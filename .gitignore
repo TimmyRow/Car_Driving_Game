@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-poki/
+*.zip
+*.log
+qa/
+*.tar.gz
+.sites-runtime/
