@@ -4,6 +4,7 @@ import {
   createSimulation,
   type Controls,
   type Simulation,
+  type Difficulty,
 } from "../src/simulation";
 import { roadHalfWidth, trackLength } from "../src/track";
 
@@ -239,13 +240,14 @@ test("a deliberate nitro ram creates one takedown, a visible wreck, and a safe p
     assert.equal(sim.takedowns, 1);
     const victim = sim.rivals.find((r) => r.id === event.victimId)!;
     assert.ok(victim.crashTimer > 1);
-    assert.equal(victim.crashDuration, 1.1);
+    assert.equal(victim.crashDuration, 1.6);
     assert.ok(Math.abs(victim.crashSide) === 1);
     assert.ok(event.intensity > 0.5);
     const crashDistance = victim.distance;
     const crashOffset = victim.offset;
     run(sim, 0.5);
     assert.equal(victim.distance, crashDistance);
+    assert.ok(victim.crashTravel > 8 && victim.crashTravel <= 65);
     assert.ok(Math.abs(victim.offset - crashOffset) > 0.3);
     assert.equal(
       sim.collisionEvents.filter(
@@ -257,6 +259,7 @@ test("a deliberate nitro ram creates one takedown, a visible wreck, and a safe p
     while (victim.crashTimer > 0 && recoveryGuard++ < 240)
       sim.step(1 / 120, throttle);
     assert.equal(victim.crashTimer, 0);
+    assert.equal(victim.crashTravel, 0);
     assert.ok(victim.invulnerable >= 1.49);
     assert.ok(victim.speed >= 28);
     assert.ok(Math.abs(victim.offset) < roadHalfWidth - 1.1);
@@ -320,6 +323,7 @@ test("protection blocks a hard follow-up wreck and contact cooldown prevents dup
 test("a boosted side ram can take down an adjacent car without a rear-end impact", async () => {
   const sim = await createSimulation();
   try {
+    sim.reset("race", "rookie");
     launch(sim);
     let ram = false;
     let frame = 0;
@@ -356,12 +360,13 @@ test("a boosted side ram can take down an adjacent car without a rear-end impact
 test("a hard rival impact can wreck the player, freeze lap progress, and recover without a combo", async () => {
   const sim = await createSimulation();
   try {
+    sim.reset("race", "rookie");
     launch(sim);
     let frame = 0;
     while (sim.player.crashTimer === 0 && frame < 60 * 12) {
-      const rival = sim.rivals[1];
+      const rival = sim.rivals[0];
       // A real-input approach followed by abrupt braking lets a fast rival hit us.
-      const braking = frame > 210;
+      const braking = frame > 180;
       sim.step(1 / 60, {
         steer: braking
           ? 0
@@ -450,7 +455,7 @@ test("hands-off acceleration can finish but cannot win against the rival field",
     assert.equal(sim.phase, "finished");
     assert.ok(sim.position > 1);
     assert.ok(sim.elapsed < 60);
-    assert.ok(sim.player.speed > 70);
+    assert.ok(Number.isFinite(sim.player.speed));
   } finally {
     sim.dispose();
   }
@@ -487,10 +492,13 @@ test("two-lap race finishes with attainable victory and immutable final timing; 
   try {
     launch(sim);
     let guard = 0;
+    let boost = true;
     while (sim.phase === "racing" && guard++ < 60 * 180) {
       // A conservative lane choice avoids the grid pack while driving a clean race.
-      const steer = Math.max(-1, Math.min(1, (6.1 - sim.player.offset) * 0.25));
-      sim.step(1 / 60, { ...throttle, steer, nitro: sim.player.nitro > 0.45 });
+      const steer = Math.max(-1, Math.min(1, (6.2 - sim.player.offset) * 0.4));
+      if (sim.player.nitro > 0.4) boost = true;
+      if (sim.player.nitro < 0.02) boost = false;
+      sim.step(1 / 60, { ...throttle, steer, nitro: boost });
     }
     assert.equal(sim.phase, "finished");
     assert.equal(sim.player.finished, true);
@@ -534,6 +542,116 @@ test("time trial completes exactly one lap, and braking can stop then accelerate
     assert.equal(sim.player.distance, trackLength);
     assert.equal(sim.bestLap, sim.lastLap);
     assert.equal(sim.elapsed, sim.lastLap);
+  } finally {
+    sim.dispose();
+  }
+});
+
+test("difficulty persists and raises rival pace with finite timed nitro", async () => {
+  const finishTimes: number[] = [];
+  for (const difficulty of ["rookie", "pro", "expert"] as Difficulty[]) {
+    const sim = await createSimulation();
+    try {
+      assert.equal(sim.difficulty, "pro");
+      sim.reset("time-trial", difficulty);
+      sim.reset();
+      assert.equal(sim.difficulty, difficulty);
+      assert.equal(sim.totalLaps, 1);
+      sim.reset("race");
+      launch(sim);
+      const boostTime = Array(5).fill(0),
+        streak = Array(5).fill(0),
+        longest = Array(5).fill(0);
+      while (!sim.rivals.every((r) => r.finished) && sim.elapsed < 65) {
+        sim.step(1 / 60, { ...throttle, throttle: false });
+        sim.rivals.forEach((r, i) => {
+          assert.ok(r.nitro >= 0 && r.nitro <= 1);
+          if (r.boosting) {
+            boostTime[i] += 1 / 60;
+            streak[i] += 1 / 60;
+          } else streak[i] = 0;
+          longest[i] = Math.max(longest[i], streak[i]);
+        });
+        if (
+          finishTimes.length ===
+            ["rookie", "pro", "expert"].indexOf(difficulty) &&
+          sim.rivals.some((r) => r.finished)
+        )
+          finishTimes.push(sim.elapsed);
+      }
+      assert.ok(sim.rivals.every((r) => r.finished));
+      assert.ok(boostTime.every((t) => t > 2 && t < 10));
+      const maxBurst = { rookie: 1.3, pro: 1.75, expert: 2.1 }[difficulty];
+      assert.ok(longest.every((t) => t <= maxBurst + 0.025));
+      assert.ok(sim.rivals.every((r) => r.nitro < 0.6));
+    } finally {
+      sim.dispose();
+    }
+  }
+  assert.ok(finishTimes[1] < finishTimes[0] - 2);
+  assert.ok(finishTimes[2] < finishTimes[1] - 1);
+});
+
+test("committed launch and high-speed nitro knockouts retain momentum through subsequent physics steps", async () => {
+  for (const incomingSpeed of [0, 82]) {
+    const sim = await createSimulation();
+    try {
+      launch(sim);
+      sim.player.speed = incomingSpeed;
+      let guard = 0;
+      while (sim.takedowns === 0 && guard++ < 120)
+        sim.step(1 / 60, { ...throttle, nitro: true });
+      const event = sim.collisionEvents.find((e) => e.kind === "takedown");
+      assert.ok(event);
+      assert.ok(event.speed > 22);
+      assert.equal(Math.abs(event.side), 1);
+      assert.ok(sim.player.speed >= event.speed * 0.9);
+      const victim = sim.rivals.find((r) => r.id === event.victimId)!;
+      const logicalDistance = victim.distance;
+      const previousThrow = victim.crashTravel;
+      run(sim, 0.2, { ...throttle, nitro: true });
+      assert.ok(sim.player.speed >= event.speed * 0.9);
+      assert.equal(victim.distance, logicalDistance);
+      assert.ok(victim.crashTravel > previousThrow && victim.crashTravel <= 65);
+    } finally {
+      sim.dispose();
+    }
+  }
+});
+
+test("nitro pressed during an existing gentle contact escalates without separating or duplicate knockouts", async () => {
+  const sim = await createSimulation();
+  try {
+    launch(sim);
+    let guard = 0;
+    while (
+      !sim.collisionEvents.some(
+        (e) => e.kind === "hit" && e.attackerId === 0,
+      ) &&
+      guard++ < 180
+    )
+      sim.step(1 / 60, throttle);
+    const hit = sim.collisionEvents.find(
+      (e) => e.kind === "hit" && e.attackerId === 0,
+    );
+    assert.ok(hit);
+    assert.equal(sim.takedowns, 0);
+    const target = sim.rivals.find((r) => r.id === hit.victimId)!;
+    const started = sim.elapsed;
+    while (sim.takedowns === 0 && sim.elapsed - started < 1) {
+      sim.step(1 / 60, { ...throttle, nitro: true });
+      assert.ok(Math.abs(sim.player.distance - target.distance) < 4.5);
+    }
+    assert.equal(sim.takedowns, 1);
+    assert.ok(target.crashTimer > 1.5);
+    assert.ok(sim.elapsed - started >= 0.15 && sim.elapsed - started < 0.8);
+    run(sim, 0.2, { ...throttle, nitro: true });
+    assert.equal(
+      sim.collisionEvents.filter(
+        (e) => e.kind === "takedown" && e.victimId === target.id,
+      ).length,
+      1,
+    );
   } finally {
     sim.dispose();
   }

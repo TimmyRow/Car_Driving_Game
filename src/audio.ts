@@ -7,13 +7,26 @@ export class RaceAudio {
   private hiss?: GainNode;
   private boost?: GainNode;
   private filter?: BiquadFilterNode;
+  private heavyCrash?: AudioBuffer;
+  private lightCrash?: AudioBuffer;
+  private lastCrash = -Infinity;
+  private duckUntil = 0;
   muted = false;
   async unlock() {
     if (!this.ctx) {
       const ctx = (this.ctx = new AudioContext());
       const master = (this.master = ctx.createGain());
-      master.gain.value = 0.35;
-      master.connect(ctx.destination);
+      master.gain.value = this.muted ? 0 : 0.35;
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -9;
+      limiter.knee.value = 5;
+      limiter.ratio.value = 8;
+      limiter.attack.value = 0.002;
+      limiter.release.value = 0.2;
+      master.connect(limiter);
+      limiter.connect(ctx.destination);
+      this.heavyCrash = this.makeCrashBuffer(ctx, true);
+      this.lightCrash = this.makeCrashBuffer(ctx, false);
       const filter = (this.filter = ctx.createBiquadFilter());
       filter.type = "lowpass";
       filter.frequency.value = 650;
@@ -75,7 +88,9 @@ export class RaceAudio {
     this.engine?.frequency.setTargetAtTime(rpm, now, 0.11);
     this.harmonic?.frequency.setTargetAtTime(rpm * 2.01, now, 0.11);
     this.engineGain?.gain.setTargetAtTime(
-      active ? 0.038 + speed * 0.00055 : 0,
+      active
+        ? (0.038 + speed * 0.00055) * (now < this.duckUntil ? 0.32 : 1)
+        : 0,
       now,
       0.12,
     );
@@ -85,7 +100,11 @@ export class RaceAudio {
       now,
       0.09,
     );
-    this.boost?.gain.setTargetAtTime(active && nitro ? 0.42 : 0, now, 0.15);
+    this.boost?.gain.setTargetAtTime(
+      active && nitro ? (now < this.duckUntil ? 0.12 : 0.42) : 0,
+      now,
+      0.15,
+    );
   }
   tone(frequency: number, duration = 0.12, volume = 0.1) {
     if (!this.ctx || !this.master) return;
@@ -100,6 +119,10 @@ export class RaceAudio {
     gain.connect(this.master);
     tone.start();
     tone.stop(now + duration);
+    tone.onended = () => {
+      tone.disconnect();
+      gain.disconnect();
+    };
   }
   impact() {
     this.tone(65, 0.18, 0.24);
@@ -107,31 +130,102 @@ export class RaceAudio {
   crash(hard: boolean) {
     if (!this.ctx || !this.master) return;
     const ctx = this.ctx,
-      duration = hard ? 0.48 : 0.15,
       now = ctx.currentTime;
+    if (now - this.lastCrash < (hard ? 0.065 : 0.11)) return;
+    this.lastCrash = now;
+    if (hard) this.duckUntil = now + 0.4;
+    const source = ctx.createBufferSource();
+    source.buffer = hard ? this.heavyCrash! : this.lightCrash!;
+    const duration = source.buffer.duration;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(hard ? 0.76 : 0.31, now);
+    source.connect(gain);
+    gain.connect(this.master);
+    source.start();
+    source.stop(now + duration);
+    source.onended = () => {
+      source.disconnect();
+      gain.disconnect();
+    };
+    this.impactDrop(
+      hard ? 142 : 108,
+      hard ? 31 : 48,
+      hard ? 0.65 : 0.18,
+      hard ? 0.7 : 0.22,
+      0,
+    );
+    if (hard) {
+      this.impactDrop(63, 27, 0.62, 0.29, 0.13);
+      this.impactDrop(49, 30, 0.38, 0.12, 0.34);
+    }
+  }
+
+  /** Cached original crunch: a sharp contact, tearing metal, then smaller aftershocks. */
+  private makeCrashBuffer(ctx: AudioContext, hard: boolean) {
+    const duration = hard ? 1.18 : 0.25;
     const buffer = ctx.createBuffer(
       1,
       Math.ceil(ctx.sampleRate * duration),
       ctx.sampleRate,
     );
     const data = buffer.getChannelData(0);
-    let last = 0;
+    let low = 0;
     for (let i = 0; i < data.length; i++) {
-      last = last * 0.67 + (Math.random() * 2 - 1) * 0.33;
-      data[i] = last * (1 - i / data.length);
+      const t = i / ctx.sampleRate,
+        white = Math.random() * 2 - 1;
+      low = low * 0.78 + white * 0.22;
+      const initial = Math.exp(-t / (hard ? 0.08 : 0.037));
+      const tear = hard
+        ? Math.exp(-t / 0.33) *
+          (0.2 +
+            0.8 * Math.pow(Math.abs(Math.sin(t * 61) * Math.sin(t * 97)), 0.7))
+        : 0;
+      const after = hard
+        ? 0.38 * Math.exp(-(((t - 0.14) / 0.052) ** 2)) +
+          0.21 * Math.exp(-(((t - 0.33) / 0.079) ** 2))
+        : 0;
+      const metal = hard
+        ? (Math.sin(t * 2 * Math.PI * 317) * 0.17 +
+            Math.sin(t * 2 * Math.PI * 523) * 0.09 +
+            Math.sin(t * 2 * Math.PI * 859) * 0.045) *
+          Math.exp(-t / 0.2)
+        : 0;
+      const body = low * (initial * 2.8 + after * 2.0);
+      const scrape = (white - low) * (initial * 0.34 + tear * 0.43);
+      const tail = Math.min(1, (duration - t) / 0.07);
+      data[i] = Math.tanh((body + scrape + metal) * 1.12) * 0.84 * tail;
     }
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(hard ? 0.85 : 0.3, now);
+    return buffer;
+  }
+
+  private impactDrop(
+    from: number,
+    to: number,
+    duration: number,
+    volume: number,
+    delay: number,
+  ) {
+    if (!this.ctx || !this.master) return;
+    const ctx = this.ctx,
+      now = ctx.currentTime + delay;
+    const oscillator = ctx.createOscillator(),
+      gain = ctx.createGain();
+    oscillator.type = "triangle";
+    oscillator.frequency.setValueAtTime(from, now);
+    oscillator.frequency.exponentialRampToValueAtTime(
+      to,
+      now + duration * 0.55,
+    );
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(volume, now + 0.004);
     gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-    source.connect(gain);
+    oscillator.connect(gain);
     gain.connect(this.master);
-    source.start();
-    source.onended = () => {
-      source.disconnect();
+    oscillator.start(now);
+    oscillator.stop(now + duration);
+    oscillator.onended = () => {
+      oscillator.disconnect();
       gain.disconnect();
     };
-    this.tone(hard ? 48 : 90, hard ? 0.3 : 0.12, hard ? 0.22 : 0.1);
   }
 }

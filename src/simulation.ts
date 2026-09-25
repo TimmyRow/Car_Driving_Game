@@ -8,6 +8,7 @@ export interface Controls {
   nitro: boolean;
 }
 export type RaceMode = "race" | "time-trial";
+export type Difficulty = "rookie" | "pro" | "expert";
 export interface Vehicle {
   id: number;
   name: string;
@@ -23,6 +24,8 @@ export interface Vehicle {
   crashTimer: number;
   crashDuration: number;
   crashSide: number;
+  /** Current visual forward displacement in meters; already eased, zero after recovery. */
+  crashTravel: number;
   invulnerable: number;
 }
 export interface CollisionEvent {
@@ -33,6 +36,8 @@ export interface CollisionEvent {
   distance: number;
   offset: number;
   intensity: number;
+  speed: number;
+  side: number;
 }
 export interface Simulation {
   player: Vehicle;
@@ -49,13 +54,58 @@ export interface Simulation {
   impact: number;
   takedowns: number;
   collisionEvents: CollisionEvent[];
-  reset(mode?: RaceMode): void;
+  difficulty: Difficulty;
+  reset(mode?: RaceMode, difficulty?: Difficulty): void;
   start(): void;
   step(dt: number, input: Controls): void;
   dispose(): void;
 }
 
 const FIXED_DT = 1 / 120;
+const DIFFICULTIES = {
+  rookie: {
+    pace: 79,
+    spread: 1.15,
+    acceleration: 12.8,
+    anticipation: 23,
+    reaction: 0.65,
+    lateral: 3.4,
+    boostSpeed: 8,
+    boostAcceleration: 19,
+    boostDuration: 1.3,
+    boostCooldown: 13,
+    recharge: 0.021,
+    curvePenalty: 2.8,
+  },
+  pro: {
+    pace: 85.2,
+    spread: 0.65,
+    acceleration: 15.2,
+    anticipation: 35,
+    reaction: 0.28,
+    lateral: 4.8,
+    boostSpeed: 10,
+    boostAcceleration: 23,
+    boostDuration: 1.75,
+    boostCooldown: 9,
+    recharge: 0.026,
+    curvePenalty: 2,
+  },
+  expert: {
+    pace: 87.4,
+    spread: 0.42,
+    acceleration: 16.5,
+    anticipation: 48,
+    reaction: 0.12,
+    lateral: 6,
+    boostSpeed: 13,
+    boostAcceleration: 27,
+    boostDuration: 2.1,
+    boostCooldown: 6.5,
+    recharge: 0.029,
+    curvePenalty: 1.4,
+  },
+};
 const clamp = (n: number, low: number, high: number) =>
   Math.max(low, Math.min(high, n));
 const approach = (a: number, b: number, rate: number, dt: number) =>
@@ -76,6 +126,12 @@ interface Driver {
   crashStartOffset: number;
   crashTargetOffset: number;
   recoverySpeed: number;
+  crashThrow: number;
+  ramMomentumTimer: number;
+  ramSpeedFloor: number;
+  aiDecisionCooldown: number;
+  aiBoostRemaining: number;
+  aiBoostCooldown: number;
 }
 
 /** Road coordinates keep the physics world compact and separate from the render graph.
@@ -95,6 +151,10 @@ export async function createSimulation(): Promise<Simulation> {
   let disposed = false;
   let nextCollisionId = 1;
   const contactCooldowns = new Map<string, number>();
+  const touchingCars = new Map<
+    string,
+    { a: Driver; b: Driver; pressure: number }
+  >();
 
   const sim: Simulation = {
     player: makeVehicle(0, "YOU", "#f4fa4a", -23, 3.7),
@@ -111,9 +171,11 @@ export async function createSimulation(): Promise<Simulation> {
     impact: 0,
     takedowns: 0,
     collisionEvents: [],
-    reset(nextMode) {
+    difficulty: "pro",
+    reset(nextMode, nextDifficulty) {
       if (disposed) return;
       mode = nextMode ?? mode;
+      sim.difficulty = nextDifficulty ?? sim.difficulty;
       if (world) world.free();
       if (events) events.free();
       world = new RAPIER.World({ x: 0, y: 0, z: 0 });
@@ -125,6 +187,7 @@ export async function createSimulation(): Promise<Simulation> {
       lapStartedAt = 0;
       nextCollisionId = 1;
       contactCooldowns.clear();
+      touchingCars.clear();
       sim.player = makeVehicle(0, "YOU", "#f4fa4a", -23, 3.7);
       sim.rivals =
         mode === "race"
@@ -184,6 +247,13 @@ export async function createSimulation(): Promise<Simulation> {
           crashStartOffset: car.offset,
           crashTargetOffset: car.offset,
           recoverySpeed: 0,
+          crashThrow: 0,
+          ramMomentumTimer: 0,
+          ramSpeedFloor: 0,
+          aiDecisionCooldown:
+            DIFFICULTIES[sim.difficulty].reaction + car.id * 0.12,
+          aiBoostRemaining: 0,
+          aiBoostCooldown: 2 + car.id * 0.7,
         };
         colliderDrivers.set(collider.handle, driver);
         return driver;
@@ -242,6 +312,7 @@ export async function createSimulation(): Promise<Simulation> {
       world.free();
       drivers = [];
       colliderDrivers.clear();
+      touchingCars.clear();
     },
   };
 
@@ -254,6 +325,7 @@ export async function createSimulation(): Promise<Simulation> {
     const oldDistances = drivers.map((d) => d.car.distance);
     for (const driver of drivers) {
       driver.contactCooldown = Math.max(0, driver.contactCooldown - dt);
+      driver.ramMomentumTimer = Math.max(0, driver.ramMomentumTimer - dt);
       driver.car.invulnerable = Math.max(0, driver.car.invulnerable - dt);
       if (driver.car.finished) {
         // Finishers clear the line and cannot become a stationary roadblock.
@@ -272,10 +344,18 @@ export async function createSimulation(): Promise<Simulation> {
     }
     world.step(events);
     events.drainCollisionEvents((a, b, started) => {
-      if (!started) return;
       const da = colliderDrivers.get(a);
       const db = colliderDrivers.get(b);
-      if (da && db) handleCarContact(da, db);
+      if (da && db) {
+        const key = contactKey(da, db);
+        if (!started) {
+          touchingCars.delete(key);
+          return;
+        }
+        touchingCars.set(key, { a: da, b: db, pressure: 0 });
+        handleCarContact(da, db);
+      }
+      if (!started) return;
       const playerContact =
         da?.car.id === 0 ? da : db?.car.id === 0 ? db : undefined;
       if (
@@ -287,6 +367,39 @@ export async function createSimulation(): Promise<Simulation> {
         playerContact.contactCooldown = 0.28;
       }
     });
+    for (const [key, contact] of touchingCars) {
+      const { a, b } = contact;
+      if (
+        a.car.crashTimer > 0 ||
+        b.car.crashTimer > 0 ||
+        a.car.finished ||
+        b.car.finished
+      ) {
+        touchingCars.delete(key);
+        continue;
+      }
+      const attacker = a.car.boosting ? a : b.car.boosting ? b : undefined;
+      const victim = attacker === a ? b : a;
+      const pressingForward =
+        attacker && attacker.car.distance < victim.car.distance - 1.5;
+      const pressingSide =
+        attacker &&
+        Math.abs(attacker.steer) > 0.35 &&
+        Math.sign(attacker.steer) ===
+          Math.sign(victim.car.offset - attacker.car.offset);
+      if (
+        attacker &&
+        attacker.velocityZ > 22 &&
+        victim.car.invulnerable <= 0 &&
+        (pressingForward || pressingSide)
+      ) {
+        contact.pressure += dt;
+        if (contact.pressure >= 0.16) {
+          handleCarContact(a, b, true);
+          contact.pressure = 0;
+        }
+      } else contact.pressure = 0;
+    }
     drivers.forEach((driver, index) => {
       const car = driver.car;
       if (car.finished || car.crashTimer > 0) return;
@@ -295,6 +408,12 @@ export async function createSimulation(): Promise<Simulation> {
       car.distance = pos.z;
       car.offset = pos.x;
       car.speed = Math.max(0, velocity.z);
+      // Preserve a successful knockout's momentum even if another contact manifold
+      // in the same physics step applied a second solver impulse to the attacker.
+      if (driver.ramMomentumTimer > 0 && !(car.id === 0 && input.brake)) {
+        car.speed = Math.max(car.speed, driver.ramSpeedFloor);
+        driver.body.setLinvel({ x: velocity.x, y: 0, z: car.speed }, true);
+      }
       // A glancing rail contact scrubs speed once, then permits an immediate recovery.
       const atWall = Math.abs(car.offset) > roadHalfWidth - 1.07;
       if (atWall && !driver.hitWall && car.speed > 12) {
@@ -357,7 +476,11 @@ export async function createSimulation(): Promise<Simulation> {
     }
   }
 
-  function handleCarContact(a: Driver, b: Driver) {
+  function contactKey(a: Driver, b: Driver) {
+    return `${Math.min(a.car.id, b.car.id)}:${Math.max(a.car.id, b.car.id)}`;
+  }
+
+  function handleCarContact(a: Driver, b: Driver, sustainedBoost = false) {
     if (
       a.car.finished ||
       b.car.finished ||
@@ -365,8 +488,9 @@ export async function createSimulation(): Promise<Simulation> {
       b.car.crashTimer > 0
     )
       return;
-    const key = `${Math.min(a.car.id, b.car.id)}:${Math.max(a.car.id, b.car.id)}`;
-    if ((contactCooldowns.get(key) ?? 0) > sim.elapsed) return;
+    const key = contactKey(a, b);
+    if (!sustainedBoost && (contactCooldowns.get(key) ?? 0) > sim.elapsed)
+      return;
     const dx = b.car.offset - a.car.offset;
     const dz = b.car.distance - a.car.distance;
     const sideContact = Math.abs(dx) > 1.35 && Math.abs(dz) < 3.4;
@@ -392,6 +516,8 @@ export async function createSimulation(): Promise<Simulation> {
       victim = attacker === a ? b : a;
       closing = Math.max(0, attacker.velocityZ - victim.velocityZ);
     }
+    if (sustainedBoost && attacker.car.boosting && victim.car.invulnerable <= 0)
+      closing = Math.max(closing, sideContact ? 2.5 : 4.5);
     if (closing < 0.8) return;
     contactCooldowns.set(key, sim.elapsed + 0.65);
     const speed = attacker.velocityZ;
@@ -401,7 +527,7 @@ export async function createSimulation(): Promise<Simulation> {
       1,
     );
     const boostedRam =
-      attacker.car.boosting && speed > 42 && closing > (sideContact ? 2 : 4);
+      attacker.car.boosting && speed > 22 && closing > (sideContact ? 2 : 4);
     const hardImpact =
       speed > (sideContact ? 48 : 42) && closing > (sideContact ? 7.5 : 18);
     const canWreck = victim.car.invulnerable <= 0 && (boostedRam || hardImpact);
@@ -410,13 +536,15 @@ export async function createSimulation(): Promise<Simulation> {
       Math.sign(victim.car.offset) ||
       (victim.car.id % 2 ? -1 : 1);
     if (canWreck) {
-      beginCrash(victim, side);
+      beginCrash(victim, side, speed);
+      attacker.ramSpeedFloor = speed * (attacker.car.boosting ? 0.96 : 0.86);
+      attacker.ramMomentumTimer = attacker.car.boosting ? 0.32 : 0.12;
       const av = attacker.body.linvel();
       attacker.body.setLinvel(
         {
           x: av.x - side * 0.8,
           y: 0,
-          z: Math.max(av.z, speed * (attacker.car.boosting ? 0.94 : 0.82)),
+          z: Math.max(av.z, attacker.ramSpeedFloor),
         },
         true,
       );
@@ -449,16 +577,26 @@ export async function createSimulation(): Promise<Simulation> {
       distance: victim.car.distance,
       offset: victim.car.offset,
       intensity,
+      speed,
+      side,
     });
     if (sim.collisionEvents.length > 32)
       sim.collisionEvents.splice(0, sim.collisionEvents.length - 32);
   }
 
-  function beginCrash(driver: Driver, side: number) {
+  function beginCrash(driver: Driver, side: number, impactSpeed: number) {
     const car = driver.car;
-    car.crashDuration = 1.1;
+    car.crashDuration = 1.6;
     car.crashTimer = car.crashDuration;
     car.crashSide = side;
+    car.crashTravel = 0;
+    driver.crashThrow = clamp(
+      Math.max(driver.velocityZ, impactSpeed * 0.8) * 0.9,
+      20,
+      65,
+    );
+    driver.ramMomentumTimer = 0;
+    driver.aiBoostRemaining = 0;
     driver.crashStartOffset = car.offset;
     driver.crashTargetOffset = clamp(
       car.offset + side * 3.2,
@@ -487,6 +625,9 @@ export async function createSimulation(): Promise<Simulation> {
     car.crashTimer = Math.max(0, car.crashTimer - dt);
     const progress = clamp(1 - car.crashTimer / car.crashDuration, 0, 1);
     const eased = 1 - (1 - progress) ** 2;
+    car.crashTravel =
+      (driver.crashThrow * (1 - Math.exp(-progress * 2.4))) /
+      (1 - Math.exp(-2.4));
     car.offset =
       driver.crashStartOffset +
       (driver.crashTargetOffset - driver.crashStartOffset) * eased;
@@ -520,6 +661,7 @@ export async function createSimulation(): Promise<Simulation> {
       return;
     }
     car.crashTimer = 0;
+    car.crashTravel = 0;
     car.offset = lane;
     car.yaw = 0;
     car.speed = driver.recoverySpeed;
@@ -603,20 +745,27 @@ export async function createSimulation(): Promise<Simulation> {
 
   function driveRival(driver: Driver, dt: number) {
     const car = driver.car;
+    const tuning = DIFFICULTIES[sim.difficulty];
     const curvature = Math.abs(sampleTrack(car.distance + 26).curvature);
     let targetSpeed =
-      (84.8 - car.id * 0.72) * clamp(1 - curvature * 2, 0.78, 1);
+      (tuning.pace - car.id * tuning.spread) *
+      clamp(1 - curvature * tuning.curvePenalty, 0.78, 1);
     // Rivals plan ahead and yield space. Their speed advantage never changes based on
     // race position, and they never teleport, draft through the player, or steal boost.
     let desiredLane = driver.targetLane;
     let blocked = false;
+    let passingOpportunity = false;
+    driver.aiDecisionCooldown = Math.max(0, driver.aiDecisionCooldown - dt);
+    driver.aiBoostCooldown = Math.max(0, driver.aiBoostCooldown - dt);
     for (const other of drivers) {
       if (other === driver || other.car.finished || other.car.crashTimer > 0)
         continue;
       const gap = other.car.distance - car.distance;
+      if (gap > 0 && gap < 70 && Math.abs(other.car.offset - car.offset) > 2.7)
+        passingOpportunity = true;
       if (
         gap > 0 &&
-        gap < 28 &&
+        gap < tuning.anticipation &&
         Math.abs(other.car.offset - car.offset) < 2.7
       ) {
         blocked = true;
@@ -624,38 +773,68 @@ export async function createSimulation(): Promise<Simulation> {
           targetSpeed,
           other.car.speed + Math.max(0, (gap - 6.5) * 0.75),
         );
+        if (driver.aiDecisionCooldown > 0) continue;
+        driver.aiDecisionCooldown = tuning.reaction;
         const options = [-5.3, -2.65, 0, 2.65, 5.3].filter((lane) =>
           drivers.every(
             (check) =>
               check === driver ||
+              check.car.finished ||
               check.car.crashTimer > 0 ||
-              Math.abs(check.car.distance - car.distance) > 24 ||
-              Math.abs(check.car.offset - lane) > 2.65,
+              (Math.abs(check.car.distance - car.distance) > 10 &&
+                (Math.abs(check.car.distance - car.distance) >
+                  tuning.anticipation * 0.65 ||
+                  Math.abs(check.car.offset - lane) > 2.65)) ||
+              (Math.abs(check.car.offset - lane) > 2.65 &&
+                (check.car.offset < Math.min(lane, car.offset) - 2.3 ||
+                  check.car.offset > Math.max(lane, car.offset) + 2.3)),
           ),
         );
         if (options.length)
-          desiredLane = options.sort(
-            (a, b) => Math.abs(a - car.offset) - Math.abs(b - car.offset),
-          )[0];
+          desiredLane = options.sort((a, b) => laneScore(b) - laneScore(a))[0];
       }
     }
     driver.targetLane = desiredLane;
-    car.boosting =
+    const clearForBoost =
       !blocked &&
-      curvature < 0.0035 &&
-      car.nitro > 0.15 &&
-      car.speed > 62 &&
-      Math.sin(sim.elapsed * 0.32 + car.id * 3) > 0.84;
+      curvature < (sim.difficulty === "expert" ? 0.006 : 0.0045) &&
+      car.speed > 55;
+    if (
+      driver.aiBoostRemaining <= 0 &&
+      driver.aiBoostCooldown <= 0 &&
+      clearForBoost &&
+      car.nitro >= 0.4 &&
+      (passingOpportunity || sim.elapsed > 7 + car.id)
+    ) {
+      driver.aiBoostRemaining = Math.min(
+        tuning.boostDuration,
+        car.nitro / 0.235,
+      );
+    }
+    car.boosting =
+      driver.aiBoostRemaining > 0 && clearForBoost && car.nitro > 0.006;
     if (car.boosting) {
-      targetSpeed += 8;
-      car.nitro = Math.max(0, car.nitro - dt * 0.2);
-    } else car.nitro = Math.min(1, car.nitro + dt * 0.026);
+      targetSpeed += tuning.boostSpeed;
+      car.nitro = Math.max(0, car.nitro - dt * 0.235);
+      driver.aiBoostRemaining = Math.max(0, driver.aiBoostRemaining - dt);
+    } else car.nitro = Math.min(1, car.nitro + dt * tuning.recharge);
+    if (driver.aiBoostRemaining > 0 && (!clearForBoost || car.nitro <= 0.006))
+      driver.aiBoostRemaining = 0;
+    if (driver.aiBoostRemaining <= 0 && car.boosting)
+      driver.aiBoostCooldown = tuning.boostCooldown + car.id * 0.3;
+    if (!clearForBoost && driver.aiBoostCooldown <= 0)
+      driver.aiBoostCooldown = 0.6;
     const acceleration = clamp(
       (targetSpeed - car.speed) * 1.2,
       -23,
-      13.5 + car.id * 0.15,
+      (car.boosting ? tuning.boostAcceleration : tuning.acceleration) +
+        car.id * 0.12,
     );
-    const lateralTarget = clamp((desiredLane - car.offset) * 1.8, -4.5, 4.5);
+    const lateralTarget = clamp(
+      (desiredLane - car.offset) * 1.8,
+      -tuning.lateral,
+      tuning.lateral,
+    );
     const lateral = approach(driver.body.linvel().x, lateralTarget, 6, dt);
     car.yaw = approach(
       car.yaw,
@@ -667,6 +846,20 @@ export async function createSimulation(): Promise<Simulation> {
       { x: lateral, y: 0, z: Math.max(0, car.speed + acceleration * dt) },
       true,
     );
+    function laneScore(lane: number) {
+      let freeAhead = tuning.anticipation;
+      for (const other of drivers) {
+        if (other === driver || other.car.finished || other.car.crashTimer > 0)
+          continue;
+        const gap = other.car.distance - car.distance;
+        if (gap > -4 && Math.abs(other.car.offset - lane) < 2.65)
+          freeAhead = Math.min(freeAhead, Math.max(0, gap));
+      }
+      return (
+        freeAhead -
+        Math.abs(lane - car.offset) * (sim.difficulty === "rookie" ? 5 : 1.8)
+      );
+    }
   }
 
   sim.reset();
@@ -693,8 +886,9 @@ function makeVehicle(
     nitro: 0.72,
     finished: false,
     crashTimer: 0,
-    crashDuration: 1.1,
+    crashDuration: 1.6,
     crashSide: 1,
+    crashTravel: 0,
     invulnerable: 0,
   };
 }

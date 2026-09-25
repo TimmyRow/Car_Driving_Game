@@ -31,7 +31,9 @@ Serve `dist/` over HTTP after building. The build uses relative asset paths and 
 
 Drifting builds nitro faster. Release an empty nitro tank before activating it again. Rivals have fixed performance with no teleporting or position-dependent speed boost. Auto acceleration helps entry; overtaking and well-timed nitro determine the win.
 
-Light contact shoves cars apart. Ram a rival from behind or the side while boosting at speed to score a takedown and regain nitro. Hard impacts can also wreck your car. Wrecks tumble with sparks, debris and smoke, then recover into an open lane with brief protection from another wreck.
+Light contact shoves cars apart. Ram a rival from behind or the side while boosting at speed to score a takedown and regain nitro. Holding nitro against a rival also builds enough pressure to break through, so an early bumper contact cannot trap a committed boost. A successful knockout preserves your momentum, throws the rival forward and triggers a brief impact stop, slow motion and a camera move. Wrecks tumble with sparks, torn panels and smoke, then recover into an open lane with brief protection from another wreck. Cinematic takedowns can be disabled in Settings; collisions and rewards still work.
+
+Settings offers Rookie, Pro (default), and Expert rivals. Higher levels increase pace, acceleration and passing reactions, and use finite nitro strategically. The selected level is saved and applies on the next race or restart; changing it during a pause does not alter the race already underway. Rivals do not teleport or receive position-based speed boosts.
 
 ## Browser presentation
 

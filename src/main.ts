@@ -11,6 +11,7 @@ import { sampleTrack, trackLength, trackPoints } from "./track";
 import {
   createSimulation,
   type Controls,
+  type Difficulty,
   type RaceMode,
   type Vehicle,
 } from "./simulation";
@@ -40,7 +41,17 @@ const settings = readSave("settings", {
   quality: "medium",
   auto: true,
   paint: "#f05b27",
+  difficulty: "pro" as Difficulty,
+  cinematic: true,
 });
+if (!["rookie", "pro", "expert"].includes(settings.difficulty))
+  settings.difficulty = "pro";
+if (typeof settings.cinematic !== "boolean") settings.cinematic = true;
+const difficultyDescriptions = {
+  rookie: "A forgiving pace with room to learn the circuit.",
+  pro: "Fast rivals who pass traffic and time their nitro.",
+  expert: "Relentless pace, assertive passing and sustained pressure.",
+};
 const validPaints = ["#f05b27", "#dfeaf0", "#12b7c1", "#e5ff54"];
 if (!validPaints.includes(settings.paint)) settings.paint = validPaints[0];
 if (!["high", "medium", "low"].includes(settings.quality))
@@ -58,17 +69,17 @@ document.body.classList.toggle("touch-mode", touch);
 
 document.querySelector("#app")!.innerHTML = `
   <canvas id="scene" aria-label="Velocity Coast 3D race track"></canvas>
-  <div class="speed-vignette"></div><div class="impact-vignette"></div>
+  <div class="speed-vignette"></div><div class="impact-vignette"></div><div class="knockout-flash"></div>
   <section id="menu" class="layer hidden" aria-label="Main menu">
     <div class="menu-shade"></div>
     <header class="masthead"><div class="brand"><i class="brand-mark"></i>VELOCITY <span class="edition"> / COAST</span></div><div class="top-actions"><button class="icon-button" id="sound" aria-label="Toggle sound">${soundIcon}</button><button class="icon-button" id="settings-open" aria-label="Settings">${gearIcon}</button><button class="icon-button" id="fullscreen" aria-label="Full screen">${fullIcon}</button></div></header>
-    <div class="hero"><div class="eyebrow">The coast is calling</div><h1>VELOCITY<span>COAST</span></h1><p class="tagline">Find your line. Feel the rush.<br>Leave everything else behind.</p><div class="race-options"><div class="mode-switch" role="group" aria-label="Race mode"><button class="active" data-mode="race" aria-pressed="true">QUICK RACE</button><button data-mode="time-trial" aria-pressed="false">TIME ATTACK</button></div></div><button id="race-start" class="race-button"><span>LET’S RACE</span><span class="arrow">↗</span></button><div class="controls-line"><kbd>← →</kbd> STEER &nbsp; <kbd>SPACE</kbd> DRIFT &nbsp; <kbd>SHIFT</kbd> NITRO</div></div>
+    <div class="hero"><div class="eyebrow">The coast is calling</div><h1>VELOCITY<span>COAST</span></h1><p class="tagline">Find your line. Feel the rush.<br>Leave everything else behind.</p><div class="race-options"><div class="mode-switch" role="group" aria-label="Race mode"><button class="active" data-mode="race" aria-pressed="true">QUICK RACE <span class="difficulty-badge" id="menu-difficulty">PRO</span></button><button data-mode="time-trial" aria-pressed="false">TIME ATTACK</button></div></div><button id="race-start" class="race-button"><span>LET’S RACE</span><span class="arrow">↗</span></button><div class="controls-line"><kbd>← →</kbd> STEER &nbsp; <kbd>SPACE</kbd> DRIFT &nbsp; <kbd>SHIFT</kbd> NITRO</div></div>
     <div class="car-caption"><div class="car-number">01</div><div><strong>APEX GT</strong><p>PURE PERFORMANCE. ZERO COMPROMISE.</p><div class="swatches" role="group" aria-label="Car paint">${validPaints.map((paint, i) => `<button class="swatch ${paint === settings.paint ? "selected" : ""}" style="--paint:${paint}" data-paint="${paint}" aria-label="${["Volcanic orange", "Glacier white", "Lagoon blue", "Acid yellow"][i]} paint" aria-pressed="${paint === settings.paint}"></button>`).join("")}</div></div></div><div class="edition-label">THE HORIZON COLLECTION — 01 / 26</div>
     <footer class="menu-footer"><div class="circuit-summary"><canvas class="circuit-map" id="menu-map" width="224" height="140"></canvas><div><span class="small">FEATURED CIRCUIT / 01</span><h2>RIVIERA RUN</h2><p id="circuit-description">${(trackLength / 1000).toFixed(1)} KM &nbsp; • &nbsp; 2 LAPS &nbsp; • &nbsp; 6 DRIVERS</p></div></div><div class="session-best">PERSONAL BEST<b id="menu-best">— : —</b></div></footer>
   </section>
   <section id="hud" class="layer hud hidden" aria-label="Race information"><div class="hud-top"><div class="race-position"><div class="position-value"><span id="position">6</span><small id="field-size"> / 6</small></div><div class="race-details"><label>RIVIERA RUN</label><strong id="race-mode-label">COASTAL SPRINT</strong><span class="lap-pill">LAP <span id="lap">1 / 2</span></span></div></div><div class="hud-top-right"><div class="clock"><small>RACE TIME</small><span id="race-time">00:00.00</span></div><button class="icon-button" id="pause" aria-label="Pause race">${pauseIcon}</button></div></div><div class="mini-map"><canvas id="race-map" width="332" height="252"></canvas><p>RIVIERA RUN</p></div><div class="speedometer"><div class="speed-row"><span class="gear" id="gear">N</span><span class="speed-number" id="speed">000</span><span class="speed-unit">KM/H</span></div><div class="nitro-title"><span>NITRO</span><span id="nitro-state">SHIFT</span></div><div class="nitro-track"><div class="nitro-fill"></div></div></div><div class="race-feedback"><div class="feedback-title" id="feedback"></div><div class="feedback-sub" id="feedback-sub"></div></div><div class="countdown hidden"><span id="countdown-value">3</span><div class="countdown-label">MAKE THE COAST YOURS</div></div><div class="race-hint" id="race-hint">AUTO ACCELERATE &nbsp; / &nbsp; ← → STEER &nbsp; / &nbsp; SPACE + STEER TO DRIFT</div><div class="touch-controls"><div><button class="touch-btn" data-control="left" aria-label="Steer left">‹</button><button class="touch-btn" data-control="right" aria-label="Steer right">›</button></div><div><button class="touch-btn drift" data-control="brake" aria-label="Brake and drift">DRIFT</button><button class="touch-btn boost" data-control="nitro" aria-label="Nitro boost">NITRO</button></div></div></section>
   <section id="pause-modal" class="layer modal-backdrop hidden" aria-label="Race paused"><div class="panel"><div class="eyebrow">Take a breath</div><h2>THE COAST<br>CAN WAIT.</h2><button class="race-button" id="resume"><span>BACK TO THE RACE</span><span>↗</span></button><button class="secondary-button" id="restart">RESTART RACE</button><button class="secondary-button" id="pause-settings">SETTINGS</button><button class="secondary-button" id="quit">BACK TO GARAGE</button></div></section>
-  <section id="settings-modal" class="layer modal-backdrop hidden" aria-label="Settings"><div class="panel"><div class="eyebrow">Make it yours</div><h2>FINE TUNE.</h2><label class="settings-row">Sound effects<input type="checkbox" id="sound-setting" ${!settings.muted ? "checked" : ""}></label><label class="settings-row">Graphics quality<select id="quality"><option value="high">Ultra</option><option value="medium">Balanced</option><option value="low">Performance</option></select></label><label class="settings-row auto-row">Auto accelerate<input type="checkbox" id="auto-setting" ${settings.auto ? "checked" : ""}></label><p class="control-guide">← → or A D — Steer<br>Space or ↓ — Brake / hold while steering to drift<br>Shift or X — Nitro &nbsp; · &nbsp; Esc — Pause<br>W / ↑ — Accelerate when auto is off<br>Touch: steering, drift and nitro buttons. Auto accelerate is always on.</p><button class="race-button" id="settings-close"><span>ALL SET</span><span>↗</span></button></div></section>
+  <section id="settings-modal" class="layer modal-backdrop hidden" aria-label="Settings"><div class="panel"><div class="eyebrow">Make it yours</div><h2>FINE TUNE.</h2><label class="settings-row">Rival difficulty<select id="difficulty" aria-describedby="difficulty-description"><option value="rookie">Rookie</option><option value="pro">Pro</option><option value="expert">Expert</option></select></label><p class="setting-description" id="difficulty-description"></p><label class="settings-row">Cinematic takedowns<input type="checkbox" id="cinematic-setting" ${settings.cinematic ? "checked" : ""}></label><label class="settings-row">Sound effects<input type="checkbox" id="sound-setting" ${!settings.muted ? "checked" : ""}></label><label class="settings-row">Graphics quality<select id="quality"><option value="high">Ultra</option><option value="medium">Balanced</option><option value="low">Performance</option></select></label><label class="settings-row auto-row">Auto accelerate<input type="checkbox" id="auto-setting" ${settings.auto ? "checked" : ""}></label><p class="control-guide">← → or A D — Steer<br>Space or ↓ — Brake / hold while steering to drift<br>Shift or X — Nitro &nbsp; · &nbsp; Esc — Pause<br>W / ↑ — Accelerate when auto is off<br>Touch: steering, drift and nitro buttons. Auto accelerate is always on.</p><button class="race-button" id="settings-close"><span>ALL SET</span><span>↗</span></button></div></section>
   <section id="results-modal" class="layer modal-backdrop hidden" aria-label="Race results"><div class="panel"><div class="eyebrow" id="result-kicker">Finish line crossed</div><h2 id="result-title">WHAT A RIDE.</h2><div class="result-position" id="result-position">1<small>ST PLACE</small></div><div class="result-stats"><div><label>RACE TIME</label><strong id="result-time">—</strong></div><div><label>BEST LAP</label><strong id="result-lap">—</strong></div><div><label>DRIFT PTS</label><strong id="result-drift">0</strong></div></div><p class="new-best" id="new-best"></p><button class="race-button" id="race-again"><span>ONE MORE RUN</span><span>↗</span></button><button class="secondary-button" id="results-garage">BACK TO GARAGE</button></div></section>
   <section id="loading" class="layer loading"><div><i class="brand-mark"></i><h1>VELOCITY COAST</h1><p id="load-message">WARMING UP THE ENGINE</p><div class="load-line"></div></div></section>`;
 
@@ -252,6 +263,11 @@ async function boot() {
   const crashes = new CrashEffects(scene);
   let lastCollisionId = 0;
   let crashSmokeClock = 0;
+  let knockoutAge = Infinity;
+  let knockoutVictim = -1;
+  let knockoutSide = 1;
+  let timeScale = 1;
+  const knockoutTarget = new THREE.Vector3();
   const cameraAnchor = new THREE.Vector3();
   const cameraTarget = new THREE.Vector3(),
     desiredCamera = new THREE.Vector3(),
@@ -315,10 +331,14 @@ async function boot() {
     void audio.unlock().catch(() => {});
     audio.setMuted(settings.muted);
     clearInput();
-    sim.reset(selectedMode);
+    sim.reset(selectedMode, settings.difficulty);
     sim.start();
     lastCollisionId = 0;
     crashes.clear();
+    clearParticles();
+    knockoutAge = Infinity;
+    knockoutVictim = -1;
+    timeScale = 1;
     lastImpact = 0;
     cameraInitialized = false;
     accumulator = 0;
@@ -332,7 +352,9 @@ async function boot() {
     showScreen("race");
     gameplay(true);
     $("#race-mode-label").textContent =
-      selectedMode === "race" ? "COASTAL SPRINT" : "TIME ATTACK";
+      selectedMode === "race"
+        ? `COASTAL SPRINT · ${sim.difficulty.toUpperCase()}`
+        : "TIME ATTACK";
     $("#field-size").textContent = selectedMode === "race" ? " / 6" : " / 1";
     $("#race-hint").textContent = touch
       ? "HOLD DRIFT + STEER TO CHARGE NITRO"
@@ -367,8 +389,12 @@ async function boot() {
   }
   function garage() {
     showScreen("menu");
-    sim.reset(selectedMode);
+    sim.reset(selectedMode, settings.difficulty);
     crashes.clear();
+    clearParticles();
+    knockoutAge = Infinity;
+    knockoutVictim = -1;
+    timeScale = 1;
     lastCollisionId = 0;
     const paint = playerCar.userData
       .paintMaterial as THREE.MeshPhysicalMaterial;
@@ -380,6 +406,8 @@ async function boot() {
     updateBest();
   }
   function finish() {
+    knockoutAge = Infinity;
+    timeScale = 1;
     gameplay(false);
     showScreen("results");
     audio.tone(523, 0.2, 0.12);
@@ -468,6 +496,24 @@ async function boot() {
   };
   $("#auto-setting").onchange = () => {
     settings.auto = $<HTMLInputElement>("#auto-setting").checked;
+    writeSave("settings", settings);
+  };
+  function difficultyUI() {
+    $<HTMLSelectElement>("#difficulty").value = settings.difficulty;
+    $("#difficulty-description").textContent =
+      `${difficultyDescriptions[settings.difficulty]} Applies to your next race.`;
+    $("#menu-difficulty").textContent = settings.difficulty.toUpperCase();
+  }
+  difficultyUI();
+  $("#difficulty").onchange = () => {
+    settings.difficulty = $<HTMLSelectElement>("#difficulty")
+      .value as Difficulty;
+    writeSave("settings", settings);
+    difficultyUI();
+  };
+  $("#cinematic-setting").onchange = () => {
+    settings.cinematic = $<HTMLInputElement>("#cinematic-setting").checked;
+    if (!settings.cinematic) knockoutAge = Infinity;
     writeSave("settings", settings);
   };
   $("#fullscreen").onclick = () => {
@@ -604,6 +650,13 @@ async function boot() {
   const particles = new THREE.Points(particleGeometry, particleMaterial);
   particles.frustumCulled = false;
   scene.add(particles);
+  function clearParticles() {
+    ages.fill(0);
+    positions.fill(-10000);
+    particleCursor = 0;
+    crashSmokeClock = 0;
+    particleGeometry.attributes.position.needsUpdate = true;
+  }
   function emitParticle(position: THREE.Vector3, color: THREE.Color) {
     const i = particleCursor++ % particleCount;
     positions[i * 3] = position.x;
@@ -707,8 +760,13 @@ async function boot() {
     }
   }
   drawMap(menuMap, false);
+  function vehicleRenderDistance(v: Vehicle) {
+    if (v.crashTimer <= 0 || v.id === 0) return v.distance;
+    // Carry the wreck forward with its incoming momentum, without awarding race progress.
+    return v.distance + v.crashTravel;
+  }
   function positionVehicle(car: THREE.Group, v: Vehicle, dt: number) {
-    const p = sampleTrack(v.distance, v.offset);
+    const p = sampleTrack(vehicleRenderDistance(v), v.offset);
     car.position.set(p.x, p.y + 0.055, p.z);
     car.rotation.set(0, p.heading + v.yaw, 0);
     const targetRoll = -v.yaw * 0.1;
@@ -720,12 +778,12 @@ async function boot() {
         1,
       );
       const arc = Math.sin(progress * Math.PI);
-      const roll = v.crashSide * progress * Math.PI * 2;
+      const roll = v.crashSide * progress * Math.PI * 3.1;
       car.position.y +=
-        arc * (v.id === 0 ? 1.4 : 2.25) + 0.65 * (1 - Math.cos(roll));
+        arc * (v.id === 0 ? 2.2 : 3.4) + 0.65 * (1 - Math.cos(roll));
       car.rotation.set(
-        arc * 0.3,
-        p.heading + v.yaw + v.crashSide * progress * Math.PI * 1.4,
+        arc * 0.75,
+        p.heading + v.yaw + v.crashSide * progress * Math.PI * 1.1,
         roll,
       );
     }
@@ -753,10 +811,24 @@ async function boot() {
     requestAnimationFrame(renderFrame);
     if (!ready) return;
     const realDt = (now - (lastTime || now)) / 1000;
-    const dt = Math.min(realDt, 0.1);
+    const frameDt = Math.min(realDt, 0.1);
     lastTime = now;
-    worldTime += dt;
     const active = screen === "race";
+    if (active) knockoutAge += frameDt;
+    timeScale =
+      !settings.cinematic || knockoutAge >= 1.05
+        ? 1
+        : knockoutAge < 0.07
+          ? 0.025
+          : knockoutAge < 0.55
+            ? 0.22
+            : THREE.MathUtils.lerp(
+                0.22,
+                1,
+                THREE.MathUtils.smoothstep(knockoutAge, 0.55, 1.05),
+              );
+    const dt = frameDt * (active ? timeScale : 1);
+    worldTime += dt;
     if (active) {
       const controls: Controls = {
         steer:
@@ -790,10 +862,19 @@ async function boot() {
         crashes.burst(event);
         if (event.attackerId === 0 || event.victimId === 0) {
           audio.crash(event.kind !== "hit");
-          if (event.kind === "takedown" && event.attackerId === 0)
-            toast("TAKEDOWN", "+ NITRO", 1.6);
-          else if (event.victimId === 0 && event.kind === "wreck")
-            toast("WRECKED", "", 1.1);
+          if (event.kind === "takedown" && event.attackerId === 0) {
+            knockoutAge = 0;
+            knockoutVictim = event.victimId;
+            knockoutSide = event.side;
+            toast(
+              "TAKEDOWN",
+              `${sim.rivals.find((v) => v.id === event.victimId)?.name ?? "RIVAL"}  /  + NITRO`,
+              2.1,
+            );
+          } else if (event.victimId === 0 && event.kind === "wreck") {
+            knockoutAge = Infinity;
+            toast("WRECKED", "", 1.6);
+          }
         }
         if (event.kind !== "hit") {
           const at = sampleTrack(event.distance, event.offset);
@@ -862,7 +943,7 @@ async function boot() {
       shadow.position.copy(car.position);
       const vehicle = i === 0 ? sim.player : sim.rivals[i - 1];
       const surface = sampleTrack(
-        menuMode ? 112 : (vehicle?.distance ?? 0),
+        menuMode ? 112 : vehicle ? vehicleRenderDistance(vehicle) : 0,
         menuMode ? 1 : (vehicle?.offset ?? 0),
       );
       shadow.position.y = surface.y + 0.04;
@@ -915,12 +996,26 @@ async function boot() {
         .addScaledVector(right, -sim.player.yaw * 1.2);
       desiredCamera.y += portrait ? 4 : 2.9;
       desiredTarget.set(look.x, look.y + 1.0, look.z);
-      camera.fov = THREE.MathUtils.damp(
-        camera.fov,
-        57 + sim.player.speed * 0.1 + boostBlend * 6,
-        5,
-        dt,
-      );
+      let targetFov = 57 + sim.player.speed * 0.1 + boostBlend * 6;
+      if (settings.cinematic && knockoutAge < 1.15 && knockoutVictim > 0) {
+        const victimIndex = sim.rivals.findIndex(
+          (v) => v.id === knockoutVictim,
+        );
+        const victimMesh = rivalCars[victimIndex];
+        const weight =
+          THREE.MathUtils.smoothstep(knockoutAge, 0, 0.08) *
+          (1 - THREE.MathUtils.smoothstep(knockoutAge, 0.62, 1.15));
+        if (victimMesh && sim.rivals[victimIndex].crashTimer > 0) {
+          desiredCamera.addScaledVector(forward, -2.3 * weight);
+          desiredCamera.addScaledVector(right, -knockoutSide * 1.6 * weight);
+          desiredCamera.y += 0.65 * weight;
+          knockoutTarget.copy(victimMesh.position);
+          knockoutTarget.y += 0.6;
+          desiredTarget.lerp(knockoutTarget, weight * 0.55);
+          targetFov -= 7 * weight;
+        }
+      }
+      camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 7, frameDt);
       if (active && sim.impact > 0.1) {
         desiredCamera.x += Math.sin(worldTime * 65) * sim.impact * 0.12;
         desiredCamera.y += Math.cos(worldTime * 52) * sim.impact * 0.07;
@@ -938,11 +1033,19 @@ async function boot() {
         camera.position.add(cameraTranslation);
         cameraTarget.add(cameraTranslation);
       }
-      const factor = 1 - Math.exp(-dt * (menuMode ? 2.4 : 9));
+      const factor = 1 - Math.exp(-frameDt * (menuMode ? 2.4 : 9));
       camera.position.lerp(desiredCamera, factor);
       cameraTarget.lerp(desiredTarget, factor);
     }
     previousCarPosition.copy(carPos);
+    if (active && settings.cinematic && knockoutAge < 0.38) {
+      const shake = (1 - knockoutAge / 0.38) ** 2;
+      camera.position.addScaledVector(
+        right,
+        Math.sin(knockoutAge * 93) * 0.19 * shake,
+      );
+      camera.position.y += Math.cos(knockoutAge * 77) * 0.09 * shake;
+    }
     camera.lookAt(cameraTarget);
     camera.updateProjectionMatrix();
     if (!menuMode) {
@@ -950,6 +1053,7 @@ async function boot() {
         const visible =
           selectedMode === "race" &&
           !(
+            vehicle.crashTimer <= 0 &&
             vehicle.distance < sim.player.distance - 2 &&
             rivalCars[i].position.distanceTo(camera.position) < 6
           );
@@ -984,7 +1088,7 @@ async function boot() {
     }
     hadDrift = active && sim.player.drifting;
     for (let i = 0; i < particleCount; i++) {
-      if (ages[i] > 0) {
+      if (active && ages[i] > 0) {
         ages[i] -= dt;
         positions[i * 3] += velocities[i * 3] * dt;
         positions[i * 3 + 1] += velocities[i * 3 + 1] * dt;
@@ -1013,7 +1117,7 @@ async function boot() {
         : touch
           ? "HOLD NITRO"
           : "SHIFT";
-      feedbackTimer = Math.max(0, feedbackTimer - dt);
+      if (active) feedbackTimer = Math.max(0, feedbackTimer - frameDt);
       const collisionFeedback =
         feedbackTimer > 0 &&
         (feedbackTitle === "TAKEDOWN" || feedbackTitle === "WRECKED");
@@ -1048,6 +1152,20 @@ async function boot() {
     }
     $(".speed-vignette").style.opacity = String(active ? boostBlend * 0.75 : 0);
     $(".impact-vignette").style.opacity = String(active ? sim.impact * 0.4 : 0);
+    $(".knockout-flash").style.opacity = String(
+      active && settings.cinematic
+        ? Math.max(0, 1 - knockoutAge / 0.16) * 0.38
+        : 0,
+    );
+    const knockoutLabel =
+      active && feedbackTimer > 0 && feedbackTitle === "TAKEDOWN";
+    $(".race-feedback").classList.toggle("knockout", knockoutLabel);
+    $(".race-feedback").style.setProperty(
+      "--impact-pop",
+      String(
+        knockoutLabel ? 1 + 0.35 * Math.max(0, 1 - knockoutAge / 0.24) : 1,
+      ),
+    );
     audio.update(
       sim.player.speed,
       sim.player.drifting,
@@ -1080,12 +1198,19 @@ async function boot() {
         boosting: sim.player.boosting,
         crashTimer: sim.player.crashTimer,
         takedowns: sim.takedowns,
-        collisionEvents: sim.collisionEvents,
+        difficulty: sim.difficulty,
+        selectedDifficulty: settings.difficulty,
+        cinematic: settings.cinematic,
+        timeScale,
+        knockoutAge,
+        collisionEvents: sim.collisionEvents.map((event) => ({ ...event })),
         rivals: sim.rivals.map((v) => ({
           id: v.id,
           distance: v.distance,
           offset: v.offset,
           speed: v.speed,
+          nitro: v.nitro,
+          boosting: v.boosting,
           crashTimer: v.crashTimer,
           invulnerable: v.invulnerable,
         })),
