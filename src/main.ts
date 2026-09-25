@@ -37,6 +37,9 @@ import {
   type Vehicle,
 } from "./simulation";
 import { RaceAudio } from "./audio";
+import { OnlineClient } from "./online-client";
+import { onlineMarkup } from "./online-ui";
+import type { RoomState } from "./online-protocol";
 import { CrashEffects } from "./crash-effects";
 import {
   initPlatform,
@@ -106,8 +109,14 @@ if (!["high", "medium", "low"].includes(settings.quality))
   settings.quality = "high";
 let selectedMode: RaceMode = "race",
   screen:
-    "menu" | "race" | "pause" | "settings" | "results" | "tracks" | "tour" =
-    "menu";
+    | "menu"
+    | "race"
+    | "pause"
+    | "settings"
+    | "results"
+    | "tracks"
+    | "tour"
+    | "online" = "menu";
 let settingsReturn: "menu" | "pause" = "menu";
 const audio = new RaceAudio();
 audio.muted = settings.muted;
@@ -121,7 +130,7 @@ document.querySelector("#app")!.innerHTML = `
   <section id="menu" class="layer hidden" aria-label="Main menu">
     <div class="menu-shade"></div>
     <header class="masthead"><div class="brand"><i class="brand-mark"></i>VELOCITY <span class="edition"> / COAST</span></div><div class="top-actions"><button class="icon-button" id="sound" aria-label="Toggle sound">${soundIcon}</button><button class="icon-button" id="settings-open" aria-label="Settings">${gearIcon}</button><button class="icon-button" id="fullscreen" aria-label="Full screen">${fullIcon}</button></div></header>
-    <div class="hero"><div class="eyebrow">The coast is calling</div><h1>VELOCITY<span>COAST</span></h1><p class="tagline">Three horizons. One open road.<br>Make every mile yours.</p><div class="race-options"><div class="mode-switch" role="group" aria-label="Race mode"><button class="active" data-mode="race" aria-pressed="true">QUICK RACE <span class="difficulty-badge" id="menu-difficulty">PRO</span></button><button data-mode="time-trial" aria-pressed="false">TIME ATTACK</button><button id="tour-open">CAREER <span class="difficulty-badge">TOUR</span></button></div></div><button id="race-start" class="race-button"><span>LET’S RACE</span><span class="arrow">↗</span></button><div class="controls-line"><kbd>← →</kbd> STEER &nbsp; <kbd>SPACE</kbd> DRIFT &nbsp; <kbd>SHIFT</kbd> NITRO</div></div>
+    <div class="hero"><div class="eyebrow">The coast is calling</div><h1>VELOCITY<span>COAST</span></h1><p class="tagline">Three horizons. One open road.<br>Make every mile yours.</p><div class="race-options"><div class="mode-switch" role="group" aria-label="Race mode"><button class="active" data-mode="race" aria-pressed="true">QUICK RACE <span class="difficulty-badge" id="menu-difficulty">PRO</span></button><button data-mode="time-trial" aria-pressed="false">TIME ATTACK</button><button id="tour-open">CAREER <span class="difficulty-badge">TOUR</span></button><button id="online-open" aria-label="Online race">ONLINE</button></div></div><button id="race-start" class="race-button"><span>LET’S RACE</span><span class="arrow">↗</span></button><div class="controls-line"><kbd>← →</kbd> STEER &nbsp; <kbd>SPACE</kbd> DRIFT &nbsp; <kbd>SHIFT</kbd> NITRO</div></div>
     <div class="car-caption"><div class="car-number">01</div><div><strong>APEX GT</strong><p>PURE PERFORMANCE. ZERO COMPROMISE.</p><div class="swatches" role="group" aria-label="Car paint">${validPaints.map((paint, i) => `<button class="swatch ${paint === settings.paint ? "selected" : ""}" style="--paint:${paint}" data-paint="${paint}" aria-label="${["Volcanic orange", "Glacier white", "Lagoon blue", "Acid yellow", ...TOUR_CHAPTERS.map((c) => c.reward)][i]} paint" aria-pressed="${paint === settings.paint}"></button>`).join("")}</div></div></div><div class="edition-label">THE HORIZON COLLECTION — 01 / 26</div>
     <footer class="menu-footer"><div class="circuit-summary"><canvas class="circuit-map" id="menu-map" width="224" height="140"></canvas><div><span class="small" id="menu-track-index">FEATURED CIRCUIT / 01</span><h2 id="menu-track-title">RIVIERA RUN</h2><button class="route-link" id="tracks-open">CHANGE ROUTE ↗</button><p id="circuit-description">${(trackLength / 1000).toFixed(1)} KM &nbsp; • &nbsp; 2 LAPS &nbsp; • &nbsp; 6 DRIVERS</p></div></div><div class="session-best">PERSONAL BEST<b id="menu-best">— : —</b></div></footer>
   </section>
@@ -131,6 +140,7 @@ document.querySelector("#app")!.innerHTML = `
   <section id="results-modal" class="layer modal-backdrop hidden" aria-label="Race results"><div class="panel"><div class="eyebrow" id="result-kicker">Finish line crossed</div><h2 id="result-title">WHAT A RIDE.</h2><div class="result-position" id="result-position">1<small>ST PLACE</small></div><div class="result-stats"><div><label>RACE TIME</label><strong id="result-time">—</strong></div><div><label>BEST LAP</label><strong id="result-lap">—</strong></div><div><label>DRIFT PTS</label><strong id="result-drift">0</strong></div></div><p class="new-best" id="new-best"></p><div id="tour-result" class="tour-result hidden"></div><div class="result-actions"><button class="race-button hidden" id="tour-next"><span>NEXT EVENT</span><span>↗</span></button><button class="secondary-button hidden" id="tour-return">BACK TO TOUR</button><button class="race-button" id="race-again"><span>ONE MORE RUN</span><span>↗</span></button><button class="secondary-button" id="results-garage">BACK TO GARAGE</button></div></div></section>
   <section id="tracks-modal" class="layer modal-backdrop hidden" aria-label="Choose route"><div class="panel route-panel"><div class="picker-heading"><div><div class="eyebrow">Explore the open road</div><h2>THREE HORIZONS.</h2></div><button class="close-button" id="tracks-close" aria-label="Close routes">×</button></div><div class="route-grid" id="route-grid"></div></div></section>
   <section id="tour-modal" class="layer modal-backdrop hidden" aria-label="Wayfinder career"><div class="panel tour-panel"><div class="picker-heading"><div><div class="eyebrow">Your road to the summit</div><h2>WAYFINDER TOUR.</h2></div><button class="close-button" id="tour-close" aria-label="Close career">×</button></div><div class="tour-summary"><span id="tour-medal-count">0 / 27 MEDALS</span><span>9 EVENTS · 3 CHAPTERS</span></div><div class="tour-grid" id="tour-grid"></div><p class="tour-footnote">Finish an event to open the next. Complete all 3 events and earn 5 medals to open the next destination. Each chapter’s paint unlocks at 5 medals.</p></div></section>
+  ${onlineMarkup}
   <section id="loading" class="layer loading"><div><i class="brand-mark"></i><h1>VELOCITY COAST</h1><p id="load-message">WARMING UP THE ENGINE</p><div class="load-line"></div></div></section>`;
 
 function timeLabel(seconds: number) {
@@ -267,6 +277,11 @@ async function boot() {
   const worlds = new Map<TrackId, THREE.Group>([[activeTrack.id, world]]);
   scene.add(world);
   const sim = await createSimulation();
+  let online: OnlineClient | null = null;
+  let onlineRound = -1;
+  let onlineBusy = false;
+  let onlineTrackLoading = false;
+  let onlineGeneration = 0;
   const playerCar = createCar(settings.paint);
   const rivalCars = sim.rivals.map((v) => createCar(v.color));
   scene.add(playerCar, ...rivalCars);
@@ -388,13 +403,17 @@ async function boot() {
     $("#menu").classList.toggle("hidden", next !== "menu");
     $("#hud").classList.toggle(
       "hidden",
-      next === "menu" || next === "tracks" || next === "tour",
+      next === "menu" ||
+        next === "tracks" ||
+        next === "tour" ||
+        next === "online",
     );
     $("#pause-modal").classList.toggle("hidden", next !== "pause");
     $("#settings-modal").classList.toggle("hidden", next !== "settings");
     $("#results-modal").classList.toggle("hidden", next !== "results");
     $("#tracks-modal").classList.toggle("hidden", next !== "tracks");
     $("#tour-modal").classList.toggle("hidden", next !== "tour");
+    $("#online-modal").classList.toggle("hidden", next !== "online");
     if (next !== "race") {
       clearInput();
       gameplay(false);
@@ -404,8 +423,11 @@ async function boot() {
       $("#hud").classList.add("hidden");
   }
   function paintCar(color: string) {
-    const materials = playerCar.userData.paintMaterials ?? [
-      playerCar.userData.paintMaterial,
+    paintMesh(playerCar, color);
+  }
+  function paintMesh(car: THREE.Group, color: string) {
+    const materials = car.userData.paintMaterials ?? [
+      car.userData.paintMaterial,
     ];
     let updated = false;
     for (const material of materials) {
@@ -415,7 +437,7 @@ async function boot() {
       }
     }
     if (!updated) {
-      playerCar.traverse((obj) => {
+      car.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
         const mat = mesh.material as THREE.MeshPhysicalMaterial;
         if (
@@ -428,6 +450,10 @@ async function boot() {
     }
   }
   async function startRace() {
+    if (online) {
+      await returnToRoom();
+      return;
+    }
     if (adPending || switchingTrack) return;
     void audio.unlock().catch(() => {});
     audio.setMuted(settings.muted);
@@ -476,11 +502,26 @@ async function boot() {
   function pause() {
     if (screen === "race") {
       showScreen("pause");
+      $("#pause-modal h2").innerHTML = online
+        ? "RACE<br>CONTINUES."
+        : "THE COAST<br>CAN WAIT.";
+      $("#pause-modal .eyebrow").textContent = online
+        ? "Online race · keep moving"
+        : "Take a breath";
+      $("#restart").classList.toggle("hidden", !!online);
+      $("#quit").textContent = online ? "LEAVE ROOM" : "BACK TO GARAGE";
       accumulator = 0;
     }
   }
   async function resume() {
     if (adPending) return;
+    if (online) {
+      clearInput();
+      showScreen("race");
+      gameplay(true);
+      lastTime = performance.now();
+      return;
+    }
     adPending = true;
     $<HTMLButtonElement>("#resume").disabled = true;
     audio.setMuted(true);
@@ -495,10 +536,16 @@ async function boot() {
     lastTime = performance.now();
   }
   function garage() {
+    if (online) {
+      void leaveOnline();
+      return;
+    }
     activeEvent = undefined;
     selectedEvent = undefined;
     showScreen("menu");
     sim.reset(selectedMode, settings.difficulty);
+    paintCar(settings.paint);
+    sim.rivals.forEach((v, i) => paintMesh(rivalCars[i], v.color));
     crashes.clear();
     clearParticles();
     knockoutAge = Infinity;
@@ -654,11 +701,356 @@ async function boot() {
     updateRouteUI();
     void startRace();
   }
+  function onlineMessage(message: string, error = false) {
+    $("#online-message").textContent = message;
+    $("#online-message").classList.toggle("error", error);
+  }
+  function renderOnlineRoom() {
+    const room = online?.room;
+    $<HTMLElement>("#online-entry").hidden = !!room;
+    $<HTMLElement>("#online-room").hidden = !room;
+    for (const id of ["#online-create", "#online-join"])
+      $<HTMLButtonElement>(id).disabled = onlineBusy;
+    if (!room || !online) return;
+    $("#room-code").textContent = room.code;
+    $("#room-route").textContent =
+      `${getTrack(room.trackId).name.toUpperCase()} · ${room.laps} LAP${room.laps === 1 ? "" : "S"} · 2 DRIVERS`;
+    $("#room-host-name").textContent = room.host.name;
+    $("#room-host-color").style.background = room.host.color;
+    $("#room-guest-name").textContent =
+      room.guest?.name ?? "Waiting for a friend…";
+    $("#room-guest-color").style.background = room.guest?.color ?? "#49636a";
+    $("#room-guest-ready").textContent = room.guest
+      ? room.guestReady
+        ? "READY"
+        : "NOT READY"
+      : "";
+    $("#room-status").textContent = onlineTrackLoading
+      ? "Loading the route…"
+      : room.phase === "finished"
+        ? online.role === "host"
+          ? "Return both drivers to the room for a rematch."
+          : "Waiting for the host to set up a rematch."
+        : !room.guest
+          ? "Share this code with your friend."
+          : !room.guestReady
+            ? "Waiting for the joining driver to get ready."
+            : "Both drivers are here. The host can start the race.";
+    $<HTMLButtonElement>("#room-start").hidden = online.role !== "host";
+    $<HTMLButtonElement>("#room-ready").hidden = online.role !== "guest";
+    $("#room-start span").textContent =
+      room.phase === "finished" ? "SET UP REMATCH" : "START RACE";
+    $<HTMLButtonElement>("#room-start").disabled =
+      onlineBusy ||
+      onlineTrackLoading ||
+      (!room.guestReady && room.phase !== "finished");
+    $<HTMLButtonElement>("#room-ready").disabled =
+      onlineBusy || onlineTrackLoading || room.phase !== "waiting";
+    $("#room-ready span").textContent = room.guestReady
+      ? "READY · TAP TO CANCEL"
+      : "I’M READY";
+  }
+  function showOnline() {
+    if (!online) {
+      const name = readSave<unknown>("online-name", "");
+      $<HTMLInputElement>("#online-name").value =
+        typeof name === "string" ? name : "";
+      $<HTMLSelectElement>("#online-route").value = activeTrack.id;
+      onlineMessage(
+        "Race a friend live. Create a private room or join their six-character code.",
+      );
+    }
+    renderOnlineRoom();
+    showScreen("online");
+  }
+  async function leaveOnline(message?: string) {
+    const client = online;
+    online = null;
+    onlineRound = -1;
+    onlineGeneration++;
+    onlineBusy = false;
+    onlineTrackLoading = false;
+    if (client) {
+      client.onRoom = undefined;
+      client.onSnapshot = undefined;
+      client.onError = undefined;
+      client.onStatus = undefined;
+      void client.leave().catch(() => client.dispose());
+    }
+    selectedMode = "race";
+    garage();
+    if (message) {
+      renderOnlineRoom();
+      showScreen("online");
+      onlineMessage(message, true);
+    }
+  }
+  async function beginOnlineRace(room: RoomState) {
+    if (!online || onlineRound === room.round || !room.guest) return;
+    if (document.hidden) {
+      await leaveOnline(
+        "The race started while your game was in the background. Keep the game visible when you’re ready to race.",
+      );
+      return;
+    }
+    const client = online,
+      generation = onlineGeneration;
+    onlineRound = room.round;
+    onlineTrackLoading = true;
+    if (!(await switchRoute(room.trackId))) {
+      await leaveOnline("The route could not load. Please try again.");
+      return;
+    }
+    if (online !== client || generation !== onlineGeneration) return;
+    onlineTrackLoading = false;
+    selectedMode = "race";
+    activeEvent = selectedEvent = undefined;
+    sim.resetOnline([room.host, room.guest], room.laps);
+    if (client.role === "host") sim.start();
+    else {
+      const state = client.sampleSnapshot();
+      if (state) sim.applyOnlineSnapshot(state, 1);
+    }
+    lastCollisionId = 0;
+    crashes.clear();
+    clearParticles();
+    knockoutAge = Infinity;
+    knockoutVictim = -1;
+    timeScale = 1;
+    lastImpact = 0;
+    cameraInitialized = false;
+    accumulator = 0;
+    lastCount = -1;
+    previousPhase = "ready";
+    driftCombo = 0;
+    peakSpeed = 0;
+    feedbackTimer = 0;
+    trailCount = 0;
+    trailGeometry.setDrawRange(0, 0);
+    clearInput();
+    paintCar(client.role === "host" ? room.host.color : room.guest.color);
+    paintMesh(
+      rivalCars[0],
+      client.role === "host" ? room.guest.color : room.host.color,
+    );
+    rivalCars.forEach((car, i) => (car.visible = i === 0));
+    contactShadows.slice(1).forEach((car, i) => (car.visible = i === 0));
+    $("#race-mode-label").textContent = "ONLINE HEAD TO HEAD";
+    $("#field-size").textContent = " / 2";
+    $("#race-hint").textContent =
+      "LIVE RACE · RUB TO JOSTLE · SLAM HARD FOR A TAKEDOWN";
+    showScreen("race");
+    gameplay(true);
+    lastTime = performance.now();
+  }
+  function onOnlineRoom(room: RoomState) {
+    if (!online) return;
+    renderOnlineRoom();
+    if (room.phase === "closed") {
+      void leaveOnline(room.closedReason ?? "The room has closed.");
+      return;
+    }
+    if (room.phase === "waiting" && onlineRound >= 0) {
+      onlineRound = -1;
+      sim.reset();
+      clearInput();
+      crashes.clear();
+      clearParticles();
+      knockoutAge = Infinity;
+      cameraInitialized = false;
+      showScreen("online");
+    } else if (
+      (room.phase === "racing" || room.phase === "finished") &&
+      onlineRound !== room.round
+    )
+      void beginOnlineRace(room);
+  }
+  async function connectOnline(join: boolean) {
+    if (onlineBusy || online) return;
+    const name = $<HTMLInputElement>("#online-name")
+      .value.trim()
+      .replace(/\s+/g, " ");
+    if (!/^[\p{L}\p{N} _.-]{2,18}$/u.test(name)) {
+      onlineMessage(
+        "Enter a driver name with 2–18 letters, numbers or spaces.",
+        true,
+      );
+      return;
+    }
+    const code = $<HTMLInputElement>("#online-code").value.trim().toUpperCase();
+    if (join && !/^[A-Z2-9]{6}$/.test(code)) {
+      onlineMessage("Enter your friend’s six-character room code.", true);
+      return;
+    }
+    onlineBusy = true;
+    renderOnlineRoom();
+    onlineMessage(
+      join ? "Joining your friend’s room…" : "Creating your private room…",
+    );
+    const generation = ++onlineGeneration;
+    try {
+      const callbacks = {
+        onRoom: onOnlineRoom,
+        onStatus: () => renderOnlineRoom(),
+        onError: (message: string, fatal: boolean) => {
+          if (fatal) void leaveOnline(message);
+          else if (screen === "online") onlineMessage(message, true);
+        },
+      };
+      const client = join
+        ? await OnlineClient.join(
+            code,
+            { name, color: settings.paint },
+            callbacks,
+          )
+        : await OnlineClient.create(
+            {
+              name,
+              color: settings.paint,
+              trackId: $<HTMLSelectElement>("#online-route").value as TrackId,
+              laps: Number($<HTMLSelectElement>("#online-laps").value) as 1 | 2,
+            },
+            callbacks,
+          );
+      if (generation !== onlineGeneration) {
+        void client.leave();
+        return;
+      }
+      online = client;
+      writeSave("online-name", name);
+      onlineTrackLoading = true;
+      renderOnlineRoom();
+      if (!(await switchRoute(client.room.trackId))) {
+        await leaveOnline(
+          "Could not load this route. Please try another room.",
+        );
+        return;
+      }
+      if (online !== client) return;
+      onlineTrackLoading = false;
+      onlineMessage(
+        "Your room is private. Share its code with your racing partner.",
+      );
+      onOnlineRoom(client.room);
+    } catch (error) {
+      if (generation === onlineGeneration)
+        onlineMessage(
+          error instanceof Error
+            ? error.message
+            : "Could not connect. Please try again.",
+          true,
+        );
+    } finally {
+      onlineBusy = false;
+      renderOnlineRoom();
+    }
+  }
+  async function roomAction(action: "start" | "reset") {
+    if (!online || onlineBusy) return;
+    onlineBusy = true;
+    renderOnlineRoom();
+    try {
+      await online.action(action);
+    } catch (error) {
+      onlineMessage(
+        error instanceof Error ? error.message : "Could not update the room.",
+        true,
+      );
+    } finally {
+      onlineBusy = false;
+      renderOnlineRoom();
+    }
+  }
+  async function returnToRoom() {
+    if (!online) return;
+    if (online.role === "host") await roomAction("reset");
+    showScreen("online");
+    renderOnlineRoom();
+  }
+  $("#online-open").onclick = showOnline;
+  $("#online-close").onclick = () => {
+    if (online) void leaveOnline();
+    else {
+      onlineGeneration++;
+      garage();
+    }
+  };
+  $("#online-create").onclick = () => void connectOnline(false);
+  $("#online-join").onclick = () => void connectOnline(true);
+  $("#online-code").addEventListener("input", () => {
+    const input = $<HTMLInputElement>("#online-code");
+    input.value = input.value.toUpperCase().replace(/[^A-Z2-9]/g, "");
+  });
+  $("#room-leave").onclick = () => void leaveOnline();
+  $("#room-start").onclick = () =>
+    void roomAction(online?.room.phase === "finished" ? "reset" : "start");
+  $("#room-ready").onclick = async () => {
+    if (!online || onlineBusy) return;
+    onlineBusy = true;
+    renderOnlineRoom();
+    try {
+      await online.setReady(!online.room.guestReady);
+    } catch (error) {
+      onlineMessage(
+        error instanceof Error ? error.message : "Could not get ready.",
+        true,
+      );
+    } finally {
+      onlineBusy = false;
+      renderOnlineRoom();
+    }
+  };
+  $("#room-copy").onclick = async () => {
+    if (!online) return;
+    try {
+      await navigator.clipboard.writeText(online.room.code);
+      $("#room-copy").textContent = "COPIED";
+      setTimeout(() => ($("#room-copy").textContent = "COPY CODE"), 1800);
+    } catch {
+      onlineMessage(
+        `Room code: ${online.room.code}. Select and copy the code above.`,
+      );
+    }
+  };
   function finish() {
     knockoutAge = Infinity;
     timeScale = 1;
     gameplay(false);
     showScreen("results");
+    if (online) {
+      const frame = sim.getOnlineSnapshot();
+      const me = frame.drivers[online.role === "host" ? 0 : 1];
+      const other = frame.drivers[online.role === "host" ? 1 : 0];
+      $("#result-kicker").textContent = "ONLINE RACE";
+      $("#result-title").textContent = "RACE COMPLETE";
+      $("#result-position").innerHTML = me.dnf
+        ? "<small>DID NOT FINISH</small>"
+        : `${me.position}<small>${me.position === 1 ? "ST" : "ND"} PLACE</small>`;
+      $("#result-time").textContent = me.dnf
+        ? "DNF"
+        : timeLabel(me.finishTime ?? 0);
+      $("#result-lap").textContent = timeLabel(me.bestLap);
+      $("#result-drift").textContent = Math.floor(
+        me.driftScore,
+      ).toLocaleString();
+      $("#new-best").textContent = other.dnf
+        ? "OTHER DRIVER · DNF"
+        : `OTHER DRIVER · ${timeLabel(other.finishTime ?? 0)}`;
+      ["#tour-result", "#tour-return", "#tour-next"].forEach((id) =>
+        $(id).classList.add("hidden"),
+      );
+      $("#race-again span").textContent = "BACK TO ROOM";
+      $("#results-garage").textContent = "LEAVE ROOM";
+      if (online.role === "host") {
+        online.publish(frame);
+        void online
+          .action("finish")
+          .catch((error) => onlineMessage(String(error)));
+      }
+      return;
+    }
+    $("#race-again span").textContent = "ONE MORE RUN";
+    $("#results-garage").textContent = "BACK TO GARAGE";
     audio.tone(523, 0.2, 0.12);
     setTimeout(() => audio.tone(659, 0.25, 0.12), 130);
     setTimeout(() => audio.tone(784, 0.4, 0.12), 290);
@@ -855,6 +1247,10 @@ async function boot() {
       else if (screen === "pause") void resume();
       else if (screen === "settings") showScreen(settingsReturn);
       else if (screen === "tour" || screen === "tracks") garage();
+      else if (screen === "online") {
+        if (online) void leaveOnline();
+        else garage();
+      }
       return;
     }
     if (event.code === "Enter" && screen === "menu") {
@@ -885,11 +1281,18 @@ async function boot() {
     });
   addEventListener("blur", () => {
     clearInput();
-    pause();
+    if (!online) pause();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       clearInput();
+      if (online) {
+        if (online.room.phase === "racing")
+          void leaveOnline(
+            "Your race was put in the background. Create or join a new room to race again.",
+          );
+        return;
+      }
       pause();
     }
   });
@@ -1103,10 +1506,12 @@ async function boot() {
     const realDt = (now - (lastTime || now)) / 1000;
     const frameDt = Math.min(realDt, 0.1);
     lastTime = now;
-    const active = screen === "race";
+    const active =
+      screen === "race" ||
+      (!!online && sim.online && (screen === "pause" || screen === "settings"));
     if (active) knockoutAge += frameDt;
     timeScale =
-      !settings.cinematic || knockoutAge >= 1.05
+      !!online || !settings.cinematic || knockoutAge >= 1.05
         ? 1
         : knockoutAge < 0.07
           ? 0.025
@@ -1141,10 +1546,25 @@ async function boot() {
           keys.has("KeyX") ||
           touches.has("nitro"),
       };
+      if (screen !== "race") {
+        controls.steer = 0;
+        controls.throttle = false;
+        controls.brake = true;
+        controls.nitro = false;
+      }
       accumulator += dt;
-      while (accumulator >= 1 / 60) {
-        sim.step(1 / 60, controls);
-        accumulator -= 1 / 60;
+      if (online?.role === "guest") {
+        online.sendInput(controls);
+        const snapshot = online.sampleSnapshot(now);
+        if (snapshot) sim.applyOnlineSnapshot(snapshot, 1);
+        accumulator = 0;
+      } else {
+        while (accumulator >= 1 / 60) {
+          if (online) sim.stepOnline(1 / 60, [controls, online.remoteInput]);
+          else sim.step(1 / 60, controls);
+          accumulator -= 1 / 60;
+        }
+        if (online) online.publish(sim.getOnlineSnapshot());
       }
       for (const event of sim.collisionEvents) {
         if (event.id <= lastCollisionId) continue;
@@ -1216,6 +1636,7 @@ async function boot() {
       screen === "menu" ||
       screen === "tracks" ||
       screen === "tour" ||
+      screen === "online" ||
       (screen === "settings" && settingsReturn === "menu");
     if (menuMode) {
       const hero = sampleTrack(112, 1);
@@ -1396,6 +1817,13 @@ async function boot() {
       $("#lap").textContent = `${sim.lap} / ${sim.totalLaps}`;
       $("#race-time").textContent =
         sim.elapsed > 0 ? timeLabel(sim.elapsed) : "00:00.00";
+      if (online && sim.player.finished) {
+        const stats =
+          sim.getOnlineSnapshot().drivers[online.role === "host" ? 0 : 1];
+        $("#race-time").textContent = stats.dnf
+          ? "DNF"
+          : timeLabel(stats.finishTime ?? 0);
+      }
       $("#speed").textContent = String(
         Math.round(sim.player.speed * 3.6),
       ).padStart(3, "0");
@@ -1447,6 +1875,14 @@ async function boot() {
           ? "HOLD NITRO AND RAM A RIVAL"
           : "HOLD SHIFT AND RAM A RIVAL FOR A TAKEDOWN";
       }
+      if (online && sim.player.finished && !sim.raceComplete) {
+        $("#race-hint").classList.remove("hidden");
+        $("#race-hint").textContent =
+          `FINISHED · WAITING FOR THE OTHER DRIVER · ${Math.ceil(sim.finishGraceRemaining ?? 30)}s`;
+      } else if (online && online.status === "reconnecting") {
+        $("#race-hint").classList.remove("hidden");
+        $("#race-hint").textContent = "CONNECTION INTERRUPTED · RECONNECTING…";
+      }
       drawMap(mapCanvas, true);
     }
     $(".speed-vignette").style.opacity = String(active ? boostBlend * 0.75 : 0);
@@ -1469,7 +1905,7 @@ async function boot() {
       sim.player.speed,
       sim.player.drifting,
       sim.player.boosting,
-      active && sim.phase === "racing",
+      screen === "race" && sim.phase === "racing",
     );
     renderer.info.autoReset = false;
     renderer.info.reset();
@@ -1501,6 +1937,18 @@ async function boot() {
           unlockedPaints: unlockedPaints(career),
         },
         objective: activeEvent ? eventGoal(activeEvent) : null,
+        online: online
+          ? {
+              room: online.room.code,
+              role: online.role,
+              status: online.status,
+              ping: online.ping,
+              phase: online.room.phase,
+              round: online.room.round,
+              ready: online.room.guestReady,
+              snapshot: sim.online ? sim.getOnlineSnapshot() : null,
+            }
+          : null,
         speed: sim.player.speed,
         distance: sim.player.distance,
         offset: sim.player.offset,

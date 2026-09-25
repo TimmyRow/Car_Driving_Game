@@ -19,3 +19,11 @@ Aim polished cohesive coastal art, cream/off-white + vivid acid yellow branding,
 `Simulation.reset(mode?,difficulty?,laps?:1|2|3)` supports career lap counts. Soft and sustained boosted contact never escalates automatically; only strong relative rear/lateral impacts wreck. The cinematic crash API remains unchanged.
 
 `career.ts` owns nine event definitions, safe save normalization, idempotent best-medal rewards, chapter gates and cosmetic unlocks. Root main.ts owns route/career menus, lighting changes and local persistence. Career event difficulty overrides Quick Race Settings only for that event. No remote account or currency service is required.
+
+## Online race
+
+Online is a separate two-human mode. The host steps `resetOnline`/`stepOnline`; the guest applies validated `OnlineSnapshot` data. Wire IDs remain host 0 and guest 1; guest display remaps its own car and collision events to local ID 0. Online time never slows for cinematic feedback. Both finish independently, with a 30-second DNF deadline after the first finish. Online results do not update solo records or career medals.
+
+`online-client.ts` owns sequenced WebRTC delivery, HTTP fallback, interpolation, stale-input braking and session teardown. `online-validation.ts` validates complete snapshots at both network boundaries. `server/online-api.ts` owns private room admission and participant permissions through prepared D1 statements; `db/schema.ts` and immutable generated `drizzle/` migrations own its schema. Room tokens are random and only hashes are stored. Two participants, one room, no public matchmaking or account service.
+
+The production build emits an ESM fetch Worker in `dist/server/`, game assets in `dist/client/`, and Sites metadata/migrations in `dist/.openai/`. Development runs the same HTTP room API with the generated schema on local SQLite. Portable and Poki exports use their configured hosted API URL.

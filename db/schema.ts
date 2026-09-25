@@ -1,0 +1,30 @@
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const raceRooms = sqliteTable(
+  "race_rooms",
+  {
+    code: text("code").primaryKey(),
+    hostToken: text("host_token").notNull(),
+    guestToken: text("guest_token"),
+    trackId: text("track_id").notNull(),
+    laps: integer("laps").notNull(),
+    phase: text("phase").notNull().default("waiting"),
+    round: integer("round").notNull().default(0),
+    hostName: text("host_name").notNull(),
+    hostColor: text("host_color").notNull(),
+    guestName: text("guest_name"),
+    guestColor: text("guest_color"),
+    guestReady: integer("guest_ready").notNull().default(0),
+    hostSeenAt: integer("host_seen_at").notNull(),
+    guestSeenAt: integer("guest_seen_at"),
+    expiresAt: integer("expires_at").notNull(),
+    closedReason: text("closed_reason"),
+    snapshot: text("snapshot"),
+    snapshotSeq: integer("snapshot_seq").notNull().default(-1),
+    input: text("input"),
+    inputSeq: integer("input_seq").notNull().default(-1),
+    offer: text("offer"),
+    answer: text("answer"),
+  },
+  (table) => [index("idx_race_rooms_expires").on(table.expiresAt)],
+);

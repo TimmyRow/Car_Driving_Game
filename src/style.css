@@ -1486,6 +1486,188 @@ button:disabled {
 }
 
 /* The Wayfinder Tour keeps route selection outside the driving view. */
+.online-panel {
+  width: 500px;
+  padding: 28px 32px;
+}
+.online-panel .picker-heading h2 {
+  font-size: 44px;
+  margin: 10px 0 18px;
+}
+.online-message {
+  font-size: 13px;
+  line-height: 1.65;
+  color: #bdced0;
+  margin: 0 0 18px;
+}
+.online-message.error {
+  color: #ffb797;
+}
+.online-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #bdd0d0;
+  margin-bottom: 8px;
+}
+.online-input {
+  width: 100%;
+  height: 46px;
+  border: 1px solid #6f909477;
+  background: #0a2029;
+  color: #eff4ec;
+  border-radius: 0;
+  padding: 10px 12px;
+  font: 500 14px var(--sans, Manrope, sans-serif);
+}
+.online-input:focus {
+  outline: 2px solid var(--acid);
+  outline-offset: 2px;
+}
+.online-create-grid {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  gap: 15px;
+  margin-top: 20px;
+}
+.online-create-grid select {
+  margin-top: 8px;
+}
+.online-panel .race-button {
+  margin-top: 10px;
+}
+.online-panel button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.online-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0 16px;
+  color: #92b2b8;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+}
+.online-divider::before,
+.online-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: #ffffff20;
+}
+.online-join-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px;
+  gap: 12px;
+}
+.online-join-row .secondary-button {
+  margin: 0;
+  min-height: 46px;
+  padding: 10px;
+  letter-spacing: 1px;
+}
+#online-code {
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+.online-footnote {
+  font-size: 10px;
+  line-height: 1.8;
+  color: #94adb0;
+  margin: 20px 0 0;
+}
+.online-room-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 0;
+  border-top: 1px solid #ffffff25;
+  border-bottom: 1px solid #ffffff25;
+  gap: 16px;
+}
+.online-room-code strong {
+  font: 700 45px/1 var(--display);
+  letter-spacing: 5px;
+  color: var(--acid);
+  user-select: text;
+}
+.online-room-code .secondary-button {
+  width: auto;
+  margin: 0;
+  white-space: nowrap;
+  min-height: 44px;
+  letter-spacing: 1px;
+}
+.online-route-summary {
+  color: #b9d1d3;
+  font-size: 10px;
+  letter-spacing: 1px;
+  margin: 18px 0;
+}
+.online-drivers {
+  margin-bottom: 20px;
+}
+.online-drivers > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid #ffffff20;
+  padding: 16px 0;
+}
+.online-drivers strong {
+  font: 600 20px var(--display);
+  overflow-wrap: anywhere;
+}
+.online-drivers small {
+  margin-left: auto;
+  font: 700 8px var(--sans, Manrope, sans-serif);
+  color: var(--acid);
+  white-space: nowrap;
+}
+.driver-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 50%;
+}
+@media (max-width: 760px) {
+  .mode-switch {
+    gap: 10px !important;
+  }
+  .mode-switch button {
+    white-space: nowrap;
+  }
+  .online-panel {
+    padding: 22px;
+  }
+  .online-panel .picker-heading h2 {
+    font-size: 37px;
+  }
+}
+@media (max-width: 359px) {
+  .mode-switch {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+  }
+  .online-panel {
+    padding: 18px;
+  }
+  .online-join-row {
+    grid-template-columns: minmax(0, 1fr) 118px;
+  }
+}
+@media (max-height: 500px) {
+  .online-panel {
+    padding: 20px 24px;
+  }
+  .online-panel .picker-heading h2 {
+    font-size: 34px;
+  }
+}
 @media (max-height: 400px) and (orientation: landscape) {
   .car-caption {
     left: 32px;

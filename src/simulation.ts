@@ -39,6 +39,36 @@ export interface CollisionEvent {
   speed: number;
   side: number;
 }
+export interface OnlinePlayer {
+  name: string;
+  color: string;
+}
+export interface OnlineDriverStats {
+  id: 0 | 1;
+  position: number;
+  lap: number;
+  bestLap: number;
+  lastLap: number;
+  driftScore: number;
+  impact: number;
+  takedowns: number;
+  finishTime: number | null;
+  dnf: boolean;
+}
+/** Wire IDs always remain host=0 and guest=1, regardless of the receiving view. */
+export interface OnlineSnapshot {
+  version: 1;
+  phase: Simulation["phase"];
+  elapsed: number;
+  countdown: number;
+  totalLaps: number;
+  difficulty: Difficulty;
+  raceComplete: boolean;
+  finishGraceRemaining: number | null;
+  vehicles: [Vehicle, Vehicle];
+  drivers: [OnlineDriverStats, OnlineDriverStats];
+  collisionEvents: CollisionEvent[];
+}
 export interface Simulation {
   player: Vehicle;
   rivals: Vehicle[];
@@ -55,9 +85,16 @@ export interface Simulation {
   takedowns: number;
   collisionEvents: CollisionEvent[];
   difficulty: Difficulty;
+  online: boolean;
+  raceComplete: boolean;
+  finishGraceRemaining: number | null;
   reset(mode?: RaceMode, difficulty?: Difficulty, laps?: 1 | 2 | 3): void;
+  resetOnline(players: [OnlinePlayer, OnlinePlayer], laps?: 1 | 2 | 3): void;
   start(): void;
   step(dt: number, input: Controls): void;
+  stepOnline(dt: number, inputs: [Controls, Controls]): void;
+  getOnlineSnapshot(): OnlineSnapshot;
+  applyOnlineSnapshot(snapshot: OnlineSnapshot, localPlayerId: 0 | 1): void;
   dispose(): void;
 }
 
@@ -119,6 +156,16 @@ interface Driver {
   hitWall: boolean;
   boostExhausted: boolean;
   finishTime: number;
+  dnf: boolean;
+  position: number;
+  lap: number;
+  nextLapDistance: number;
+  lapStartedAt: number;
+  bestLap: number;
+  lastLap: number;
+  driftScore: number;
+  impact: number;
+  takedowns: number;
   targetLane: number;
   contactCooldown: number;
   velocityX: number;
@@ -146,8 +193,8 @@ export async function createSimulation(): Promise<Simulation> {
   let colliderDrivers = new Map<number, Driver>();
   let mode: RaceMode = "race";
   let accumulator = 0;
-  let nextLapDistance = trackLength;
-  let lapStartedAt = 0;
+  let finishDeadline: number | null = null;
+  let displaySnapshot: OnlineSnapshot | null = null;
   let disposed = false;
   let nextCollisionId = 1;
   const contactCooldowns = new Map<string, number>();
@@ -168,138 +215,83 @@ export async function createSimulation(): Promise<Simulation> {
     takedowns: 0,
     collisionEvents: [],
     difficulty: "pro",
-    reset(nextMode, nextDifficulty, laps) {
-      if (disposed) return;
-      mode = nextMode ?? mode;
-      sim.difficulty = nextDifficulty ?? sim.difficulty;
-      const raceLaps = laps ?? (nextMode === undefined ? sim.totalLaps : mode === "race" ? 2 : 1);
-      if (world) world.free();
-      if (events) events.free();
-      world = new RAPIER.World({ x: 0, y: 0, z: 0 });
-      world.timestep = FIXED_DT;
-      events = new RAPIER.EventQueue(true);
-      colliderDrivers = new Map();
-      accumulator = 0;
-      nextLapDistance = trackLength;
-      lapStartedAt = 0;
-      nextCollisionId = 1;
-      contactCooldowns.clear();
-      sim.player = makeVehicle(0, "YOU", "#f4fa4a", -23, 3.7);
-      sim.rivals =
-        mode === "race"
-          ? [
-              makeVehicle(1, "NOVA", "#fa633b", -2, -3.7),
-              makeVehicle(2, "SORA", "#69cced", -3, 3.7),
-              makeVehicle(3, "JUNO", "#ded6c9", -9.5, -3.7),
-              makeVehicle(4, "ATLAS", "#9978dc", -10.5, 3.7),
-              makeVehicle(5, "RIO", "#ef578e", -17, -3.7),
-            ]
-          : [];
-      Object.assign(sim, {
-        phase: "ready",
-        elapsed: 0,
-        countdown: 3,
-        position: sim.rivals.length + 1,
-        lap: 1,
-        totalLaps: raceLaps,
-        bestLap: 0,
-        lastLap: 0,
-        driftScore: 0,
-        impact: 0,
-        takedowns: 0,
-        collisionEvents: [],
-      });
-      // Cars are free to translate in the road plane. Rotation is visual tire slip,
-      // while rectangular contact patches prevent unstable flips and hard snagging.
-      drivers = [sim.player, ...sim.rivals].map((car) => {
-        const body = world.createRigidBody(
-          RAPIER.RigidBodyDesc.dynamic()
-            .setTranslation(car.offset, 0, car.distance)
-            .enabledTranslations(true, false, true)
-            .lockRotations()
-            .setCcdEnabled(true)
-            .setCanSleep(false),
-        );
-        const collider = world.createCollider(
-          RAPIER.ColliderDesc.cuboid(1.015, 0.6, 2.18)
-            .setMass(1300)
-            .setFriction(0.035)
-            .setRestitution(0.12)
-            .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
-          body,
-        );
-        const driver: Driver = {
-          car,
-          body,
-          steer: 0,
-          slide: 0,
-          hitWall: false,
-          boostExhausted: false,
-          finishTime: Infinity,
-          targetLane: car.offset,
-          contactCooldown: 0,
-          velocityX: 0,
-          velocityZ: 0,
-          crashStartOffset: car.offset,
-          crashTargetOffset: car.offset,
-          recoverySpeed: 0,
-          crashThrow: 0,
-          ramMomentumTimer: 0,
-          ramSpeedFloor: 0,
-          aiDecisionCooldown:
-            DIFFICULTIES[sim.difficulty].reaction + car.id * 0.12,
-          aiBoostRemaining: 0,
-          aiBoostCooldown: 2 + car.id * 0.7,
-        };
-        colliderDrivers.set(collider.handle, driver);
-        return driver;
-      });
-      const wallLength = trackLength * 3 + 300;
-      for (const side of [-1, 1]) {
-        world.createCollider(
-          RAPIER.ColliderDesc.cuboid(0.5, 2, wallLength / 2)
-            .setTranslation(
-              side * (roadHalfWidth + 0.5),
-              0,
-              wallLength / 2 - 100,
-            )
-            .setFriction(0.01)
-            .setRestitution(0.12),
-        );
-      }
+    online: false,
+    raceComplete: false,
+    finishGraceRemaining: null,
+    reset: resetRace,
+    resetOnline(players, laps = 2) {
+      resetRace("race", undefined, laps, players);
     },
     start() {
-      if (!disposed && sim.phase === "ready") sim.phase = "countdown";
+      if (!disposed && !displaySnapshot && sim.phase === "ready")
+        sim.phase = "countdown";
     },
     step(dt, input) {
-      if (
-        disposed ||
-        sim.phase === "ready" ||
-        sim.phase === "finished" ||
-        !Number.isFinite(dt) ||
-        dt <= 0
-      )
-        return;
-      // A tab resuming after suspension must not fast-forward an entire race.
-      accumulator += Math.min(dt, 0.25);
-      const controls = {
-        ...input,
-        steer: clamp(Number.isFinite(input.steer) ? input.steer : 0, -1, 1),
+      if (!sim.online) advance(dt, [input]);
+    },
+    stepOnline(dt, inputs) {
+      if (sim.online) advance(dt, inputs);
+    },
+    getOnlineSnapshot() {
+      if (displaySnapshot) return cloneSnapshot(displaySnapshot);
+      if (!sim.online)
+        throw new Error(
+          "Call resetOnline before requesting an online snapshot",
+        );
+      return {
+        version: 1,
+        phase: sim.phase,
+        elapsed: sim.elapsed,
+        countdown: sim.countdown,
+        totalLaps: sim.totalLaps,
+        difficulty: sim.difficulty,
+        raceComplete: sim.raceComplete,
+        finishGraceRemaining: sim.finishGraceRemaining,
+        vehicles: [{ ...drivers[0].car }, { ...drivers[1].car }],
+        drivers: [driverStats(drivers[0]), driverStats(drivers[1])],
+        collisionEvents: sim.collisionEvents.map((event) => ({ ...event })),
       };
-      while (accumulator + 1e-10 >= FIXED_DT) {
-        accumulator -= FIXED_DT;
-        if (sim.phase === "countdown") {
-          sim.countdown = Math.max(0, sim.countdown - FIXED_DT);
-          if (sim.countdown < 1e-8) {
-            sim.countdown = 0;
-            sim.phase = "racing";
-          }
-        } else if (sim.phase === "racing") tick(controls);
-        else {
-          accumulator = 0;
-          break;
-        }
-      }
+    },
+    applyOnlineSnapshot(snapshot, localPlayerId) {
+      if (disposed) return;
+      displaySnapshot = cloneSnapshot(snapshot);
+      const remoteId = localPlayerId === 0 ? 1 : 0;
+      const stats = snapshot.drivers[localPlayerId];
+      mode = "race";
+      accumulator = 0;
+      Object.assign(sim, {
+        online: true,
+        phase: snapshot.phase,
+        elapsed: snapshot.elapsed,
+        countdown: snapshot.countdown,
+        totalLaps: snapshot.totalLaps,
+        difficulty: snapshot.difficulty,
+        raceComplete: snapshot.raceComplete,
+        finishGraceRemaining: snapshot.finishGraceRemaining,
+        player: { ...snapshot.vehicles[localPlayerId], id: 0 },
+        rivals: [{ ...snapshot.vehicles[remoteId], id: 1 }],
+        position: stats.position,
+        lap: stats.lap,
+        bestLap: stats.bestLap,
+        lastLap: stats.lastLap,
+        driftScore: stats.driftScore,
+        impact: stats.impact,
+        takedowns: stats.takedowns,
+        collisionEvents: snapshot.collisionEvents.map((event) => {
+          const attackerId = event.attackerId === localPlayerId ? 0 : 1;
+          return {
+            ...event,
+            attackerId,
+            victimId: event.victimId === localPlayerId ? 0 : 1,
+            kind:
+              event.kind === "hit"
+                ? "hit"
+                : attackerId === 0
+                  ? "takedown"
+                  : "wreck",
+          };
+        }),
+      });
     },
     dispose() {
       if (disposed) return;
@@ -311,17 +303,170 @@ export async function createSimulation(): Promise<Simulation> {
     },
   };
 
-  function tick(input: Controls) {
+  function advance(dt: number, inputs: Controls[]) {
+    if (
+      disposed ||
+      displaySnapshot ||
+      sim.phase === "ready" ||
+      sim.phase === "finished" ||
+      !Number.isFinite(dt) ||
+      dt <= 0
+    )
+      return;
+    // A tab resuming after suspension must not fast-forward an entire race.
+    accumulator += Math.min(dt, 0.25);
+    const controls = inputs.map((input) => ({
+      steer: clamp(Number.isFinite(input.steer) ? input.steer : 0, -1, 1),
+      throttle: !!input.throttle,
+      brake: !!input.brake,
+      nitro: !!input.nitro,
+    }));
+    while (accumulator + 1e-10 >= FIXED_DT) {
+      accumulator -= FIXED_DT;
+      if (sim.phase === "countdown") {
+        sim.countdown = Math.max(0, sim.countdown - FIXED_DT);
+        if (sim.countdown < 1e-8) {
+          sim.countdown = 0;
+          sim.phase = "racing";
+        }
+      } else if (sim.phase === "racing") tick(controls);
+      else {
+        accumulator = 0;
+        break;
+      }
+    }
+  }
+
+  function resetRace(
+    nextMode?: RaceMode,
+    nextDifficulty?: Difficulty,
+    laps?: 1 | 2 | 3,
+    players?: [OnlinePlayer, OnlinePlayer],
+  ) {
+    if (disposed) return;
+    mode = nextMode ?? mode;
+    sim.online = !!players;
+    displaySnapshot = null;
+    finishDeadline = null;
+    sim.difficulty = nextDifficulty ?? sim.difficulty;
+    const raceLaps =
+      laps ??
+      (nextMode === undefined ? sim.totalLaps : mode === "race" ? 2 : 1);
+    if (world) world.free();
+    if (events) events.free();
+    world = new RAPIER.World({ x: 0, y: 0, z: 0 });
+    world.timestep = FIXED_DT;
+    events = new RAPIER.EventQueue(true);
+    colliderDrivers = new Map();
+    accumulator = 0;
+    nextCollisionId = 1;
+    contactCooldowns.clear();
+    sim.player = players
+      ? makeVehicle(0, players[0].name, players[0].color, -8, 3.7)
+      : makeVehicle(0, "YOU", "#f4fa4a", -23, 3.7);
+    sim.rivals = players
+      ? [makeVehicle(1, players[1].name, players[1].color, -8, -3.7)]
+      : mode === "race"
+        ? [
+            makeVehicle(1, "NOVA", "#fa633b", -2, -3.7),
+            makeVehicle(2, "SORA", "#69cced", -3, 3.7),
+            makeVehicle(3, "JUNO", "#ded6c9", -9.5, -3.7),
+            makeVehicle(4, "ATLAS", "#9978dc", -10.5, 3.7),
+            makeVehicle(5, "RIO", "#ef578e", -17, -3.7),
+          ]
+        : [];
+    Object.assign(sim, {
+      phase: "ready",
+      elapsed: 0,
+      countdown: 3,
+      position: players ? 1 : sim.rivals.length + 1,
+      lap: 1,
+      totalLaps: raceLaps,
+      bestLap: 0,
+      lastLap: 0,
+      driftScore: 0,
+      impact: 0,
+      takedowns: 0,
+      collisionEvents: [],
+      raceComplete: false,
+      finishGraceRemaining: null,
+    });
+    // Cars are free to translate in the road plane. Rotation is visual tire slip,
+    // while rectangular contact patches prevent unstable flips and hard snagging.
+    drivers = [sim.player, ...sim.rivals].map((car) => {
+      const body = world.createRigidBody(
+        RAPIER.RigidBodyDesc.dynamic()
+          .setTranslation(car.offset, 0, car.distance)
+          .enabledTranslations(true, false, true)
+          .lockRotations()
+          .setCcdEnabled(true)
+          .setCanSleep(false),
+      );
+      const collider = world.createCollider(
+        RAPIER.ColliderDesc.cuboid(1.015, 0.6, 2.18)
+          .setMass(1300)
+          .setFriction(0.035)
+          .setRestitution(0.12)
+          .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+        body,
+      );
+      const driver: Driver = {
+        car,
+        body,
+        steer: 0,
+        slide: 0,
+        hitWall: false,
+        boostExhausted: false,
+        finishTime: Infinity,
+        dnf: false,
+        position: players ? 1 : car.id === 0 ? sim.rivals.length + 1 : car.id,
+        lap: 1,
+        nextLapDistance: trackLength,
+        lapStartedAt: 0,
+        bestLap: 0,
+        lastLap: 0,
+        driftScore: 0,
+        impact: 0,
+        takedowns: 0,
+        targetLane: car.offset,
+        contactCooldown: 0,
+        velocityX: 0,
+        velocityZ: 0,
+        crashStartOffset: car.offset,
+        crashTargetOffset: car.offset,
+        recoverySpeed: 0,
+        crashThrow: 0,
+        ramMomentumTimer: 0,
+        ramSpeedFloor: 0,
+        aiDecisionCooldown:
+          DIFFICULTIES[sim.difficulty].reaction + car.id * 0.12,
+        aiBoostRemaining: 0,
+        aiBoostCooldown: 2 + car.id * 0.7,
+      };
+      colliderDrivers.set(collider.handle, driver);
+      return driver;
+    });
+    const wallLength = trackLength * 3 + 300;
+    for (const side of [-1, 1]) {
+      world.createCollider(
+        RAPIER.ColliderDesc.cuboid(0.5, 2, wallLength / 2)
+          .setTranslation(side * (roadHalfWidth + 0.5), 0, wallLength / 2 - 100)
+          .setFriction(0.01)
+          .setRestitution(0.12),
+      );
+    }
+  }
+
+  function tick(inputs: Controls[]) {
     const dt = FIXED_DT;
-    const previousDistance = sim.player.distance;
     const previousTime = sim.elapsed;
     sim.elapsed += dt;
-    sim.impact = Math.max(0, sim.impact - dt * 2.8);
     const oldDistances = drivers.map((d) => d.car.distance);
     for (const driver of drivers) {
       driver.contactCooldown = Math.max(0, driver.contactCooldown - dt);
       driver.ramMomentumTimer = Math.max(0, driver.ramMomentumTimer - dt);
       driver.car.invulnerable = Math.max(0, driver.car.invulnerable - dt);
+      driver.impact = Math.max(0, driver.impact - dt * 2.8);
       if (driver.car.finished) {
         // Finishers clear the line and cannot become a stationary roadblock.
         driver.car.distance += driver.car.speed * dt;
@@ -331,7 +476,8 @@ export async function createSimulation(): Promise<Simulation> {
         updateCrash(driver, dt);
         continue;
       }
-      if (driver.car.id === 0) drivePlayer(driver, input, dt);
+      if (sim.online || driver.car.id === 0)
+        drivePlayer(driver, inputs[driver.car.id], dt);
       else driveRival(driver, dt);
       const velocity = driver.body.linvel();
       driver.velocityX = velocity.x;
@@ -343,15 +489,16 @@ export async function createSimulation(): Promise<Simulation> {
       const da = colliderDrivers.get(a);
       const db = colliderDrivers.get(b);
       if (da && db) handleCarContact(da, db);
-      const playerContact =
-        da?.car.id === 0 ? da : db?.car.id === 0 ? db : undefined;
-      if (
-        playerContact &&
-        playerContact.contactCooldown <= 0 &&
-        playerContact.car.speed > 8
-      ) {
-        sim.impact = Math.max(sim.impact, da && db ? 0.5 : 0.72);
-        playerContact.contactCooldown = 0.28;
+      for (const contact of [da, db]) {
+        if (
+          contact &&
+          (sim.online || contact.car.id === 0) &&
+          contact.contactCooldown <= 0 &&
+          contact.car.speed > 8
+        ) {
+          contact.impact = Math.max(contact.impact, da && db ? 0.5 : 0.72);
+          contact.contactCooldown = 0.28;
+        }
       }
     });
     drivers.forEach((driver, index) => {
@@ -364,14 +511,14 @@ export async function createSimulation(): Promise<Simulation> {
       car.speed = Math.max(0, velocity.z);
       // Preserve a successful knockout's momentum even if another contact manifold
       // in the same physics step applied a second solver impulse to the attacker.
-      if (driver.ramMomentumTimer > 0 && !(car.id === 0 && input.brake)) {
+      if (driver.ramMomentumTimer > 0 && !inputs[car.id]?.brake) {
         car.speed = Math.max(car.speed, driver.ramSpeedFloor);
         driver.body.setLinvel({ x: velocity.x, y: 0, z: car.speed }, true);
       }
       // A glancing rail contact scrubs speed once, then permits an immediate recovery.
       const atWall = Math.abs(car.offset) > roadHalfWidth - 1.07;
       if (atWall && !driver.hitWall && car.speed > 12) {
-        car.speed *= car.id === 0 ? 0.84 : 0.91;
+        car.speed *= sim.online || car.id === 0 ? 0.84 : 0.91;
         driver.body.setLinvel({ x: velocity.x, y: 0, z: car.speed }, true);
       }
       if (atWall) driver.hitWall = true;
@@ -385,7 +532,16 @@ export async function createSimulation(): Promise<Simulation> {
           0,
           1,
         );
-        driver.finishTime = previousTime + fraction * dt;
+        const crossedAt = previousTime + fraction * dt;
+        if (
+          sim.online &&
+          finishDeadline !== null &&
+          crossedAt > finishDeadline + 1e-8
+        )
+          return;
+        driver.finishTime = crossedAt;
+        if (sim.online)
+          finishDeadline = Math.min(finishDeadline ?? Infinity, crossedAt + 30);
         car.finished = true;
         car.distance = finishDistance;
         car.boosting = false;
@@ -398,36 +554,101 @@ export async function createSimulation(): Promise<Simulation> {
         driver.body.setEnabled(false);
       }
     });
-    if (sim.player.crashTimer <= 0 && sim.player.distance >= nextLapDistance) {
-      const fraction = clamp(
-        (nextLapDistance - previousDistance) /
-          Math.max(0.001, sim.player.distance - previousDistance),
-        0,
-        1,
-      );
-      const crossedAt = sim.player.finished
-        ? drivers[0].finishTime
-        : previousTime + fraction * dt;
-      sim.lastLap = crossedAt - lapStartedAt;
-      sim.bestLap =
-        sim.bestLap > 0 ? Math.min(sim.bestLap, sim.lastLap) : sim.lastLap;
-      lapStartedAt = crossedAt;
-      nextLapDistance += trackLength;
-      sim.lap = Math.min(sim.totalLaps, sim.lap + 1);
+    drivers.forEach((driver, index) => {
+      const car = driver.car;
+      if (
+        !driver.dnf &&
+        driver.nextLapDistance <= trackLength * sim.totalLaps &&
+        (car.finished ||
+          driver.nextLapDistance < trackLength * sim.totalLaps) &&
+        car.crashTimer <= 0 &&
+        car.distance >= driver.nextLapDistance
+      ) {
+        const fraction = clamp(
+          (driver.nextLapDistance - oldDistances[index]) /
+            Math.max(0.001, car.distance - oldDistances[index]),
+          0,
+          1,
+        );
+        const crossedAt = car.finished
+          ? driver.finishTime
+          : previousTime + fraction * dt;
+        driver.lastLap = crossedAt - driver.lapStartedAt;
+        driver.bestLap =
+          driver.bestLap > 0
+            ? Math.min(driver.bestLap, driver.lastLap)
+            : driver.lastLap;
+        driver.lapStartedAt = crossedAt;
+        driver.nextLapDistance += trackLength;
+        driver.lap = Math.min(sim.totalLaps, driver.lap + 1);
+      }
+    });
+    if (
+      sim.online &&
+      finishDeadline !== null &&
+      sim.elapsed >= finishDeadline
+    ) {
+      for (const driver of drivers) {
+        if (driver.car.finished) continue;
+        driver.dnf = true;
+        driver.car.finished = true;
+        driver.car.boosting = false;
+        driver.car.drifting = false;
+        driver.car.speed = 0;
+        driver.body.setEnabled(false);
+      }
     }
-    sim.position =
-      1 +
-      drivers
-        .slice(1)
-        .filter((d) =>
-          sim.player.finished
-            ? d.finishTime < drivers[0].finishTime
-            : d.car.distance > sim.player.distance,
-        ).length;
-    if (sim.player.finished) {
-      sim.elapsed = drivers[0].finishTime;
+    for (const driver of drivers) {
+      driver.position =
+        1 +
+        drivers.filter((other) => {
+          if (other === driver) return false;
+          if (Number.isFinite(driver.finishTime))
+            return other.finishTime < driver.finishTime;
+          return (
+            Number.isFinite(other.finishTime) ||
+            other.car.distance > driver.car.distance
+          );
+        }).length;
+    }
+    sim.raceComplete = sim.online
+      ? drivers.every((driver) => driver.car.finished)
+      : sim.player.finished;
+    if (sim.raceComplete) {
+      sim.elapsed = sim.online
+        ? drivers.some((driver) => driver.dnf)
+          ? finishDeadline!
+          : Math.max(...drivers.map((driver) => driver.finishTime))
+        : drivers[0].finishTime;
       sim.phase = "finished";
     }
+    sim.finishGraceRemaining =
+      finishDeadline === null
+        ? null
+        : Math.max(0, finishDeadline - sim.elapsed);
+    const local = drivers[0];
+    sim.position = local.position;
+    sim.lap = local.lap;
+    sim.bestLap = local.bestLap;
+    sim.lastLap = local.lastLap;
+    sim.driftScore = local.driftScore;
+    sim.impact = local.impact;
+    sim.takedowns = local.takedowns;
+  }
+
+  function driverStats(driver: Driver): OnlineDriverStats {
+    return {
+      id: driver.car.id as 0 | 1,
+      position: driver.position,
+      lap: driver.lap,
+      bestLap: driver.bestLap,
+      lastLap: driver.lastLap,
+      driftScore: driver.driftScore,
+      impact: driver.impact,
+      takedowns: driver.takedowns,
+      finishTime: Number.isFinite(driver.finishTime) ? driver.finishTime : null,
+      dnf: driver.dnf,
+    };
   }
 
   function contactKey(a: Driver, b: Driver) {
@@ -443,8 +664,7 @@ export async function createSimulation(): Promise<Simulation> {
     )
       return;
     const key = contactKey(a, b);
-    if ((contactCooldowns.get(key) ?? 0) > sim.elapsed)
-      return;
+    if ((contactCooldowns.get(key) ?? 0) > sim.elapsed) return;
     const dx = b.car.offset - a.car.offset;
     const dz = b.car.distance - a.car.distance;
     const sideContact = Math.abs(dx) > 1.35 && Math.abs(dz) < 3.4;
@@ -500,12 +720,12 @@ export async function createSimulation(): Promise<Simulation> {
         },
         true,
       );
-      if (attacker.car.id === 0) {
-        sim.takedowns++;
+      if (sim.online || attacker.car.id === 0) {
+        attacker.takedowns++;
         attacker.car.nitro = Math.min(1, attacker.car.nitro + 0.12);
-        sim.impact = Math.max(sim.impact, 0.7);
+        attacker.impact = Math.max(attacker.impact, 0.7);
       }
-      if (victim.car.id === 0) sim.impact = 1;
+      if (sim.online || victim.car.id === 0) victim.impact = 1;
     } else {
       // Rapier supplies the solid contact response. A small lateral impulse makes a
       // rubbing panel or rear bump legible and gives both drivers room to recover.
@@ -660,7 +880,7 @@ export async function createSimulation(): Promise<Simulation> {
       car.nitro = Math.min(1, car.nitro + dt * regeneration);
     }
     if (car.drifting)
-      sim.driftScore += dt * car.speed * Math.abs(driver.steer) * 1.7;
+      driver.driftScore += dt * car.speed * Math.abs(driver.steer) * 1.7;
 
     const topSpeed = car.boosting ? 109 : 83;
     const accelerator = input.throttle || driftRequested;
@@ -816,6 +1036,15 @@ export async function createSimulation(): Promise<Simulation> {
 
   sim.reset();
   return sim;
+}
+
+function cloneSnapshot(snapshot: OnlineSnapshot): OnlineSnapshot {
+  return {
+    ...snapshot,
+    vehicles: [{ ...snapshot.vehicles[0] }, { ...snapshot.vehicles[1] }],
+    drivers: [{ ...snapshot.drivers[0] }, { ...snapshot.drivers[1] }],
+    collisionEvents: snapshot.collisionEvents.map((event) => ({ ...event })),
+  };
 }
 
 function makeVehicle(

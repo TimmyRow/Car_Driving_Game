@@ -1,7 +1,9 @@
 import { defineConfig } from "vite";
+import { onlineDev } from "./server/dev-plugin";
 
 export default defineConfig({
   base: "./",
+  plugins: [onlineDev()],
   build: {
     rollupOptions: {
       output: {
