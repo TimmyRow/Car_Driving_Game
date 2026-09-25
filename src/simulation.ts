@@ -55,7 +55,7 @@ export interface Simulation {
   takedowns: number;
   collisionEvents: CollisionEvent[];
   difficulty: Difficulty;
-  reset(mode?: RaceMode, difficulty?: Difficulty): void;
+  reset(mode?: RaceMode, difficulty?: Difficulty, laps?: 1 | 2 | 3): void;
   start(): void;
   step(dt: number, input: Controls): void;
   dispose(): void;
@@ -151,10 +151,6 @@ export async function createSimulation(): Promise<Simulation> {
   let disposed = false;
   let nextCollisionId = 1;
   const contactCooldowns = new Map<string, number>();
-  const touchingCars = new Map<
-    string,
-    { a: Driver; b: Driver; pressure: number }
-  >();
 
   const sim: Simulation = {
     player: makeVehicle(0, "YOU", "#f4fa4a", -23, 3.7),
@@ -172,10 +168,11 @@ export async function createSimulation(): Promise<Simulation> {
     takedowns: 0,
     collisionEvents: [],
     difficulty: "pro",
-    reset(nextMode, nextDifficulty) {
+    reset(nextMode, nextDifficulty, laps) {
       if (disposed) return;
       mode = nextMode ?? mode;
       sim.difficulty = nextDifficulty ?? sim.difficulty;
+      const raceLaps = laps ?? (nextMode === undefined ? sim.totalLaps : mode === "race" ? 2 : 1);
       if (world) world.free();
       if (events) events.free();
       world = new RAPIER.World({ x: 0, y: 0, z: 0 });
@@ -187,7 +184,6 @@ export async function createSimulation(): Promise<Simulation> {
       lapStartedAt = 0;
       nextCollisionId = 1;
       contactCooldowns.clear();
-      touchingCars.clear();
       sim.player = makeVehicle(0, "YOU", "#f4fa4a", -23, 3.7);
       sim.rivals =
         mode === "race"
@@ -205,7 +201,7 @@ export async function createSimulation(): Promise<Simulation> {
         countdown: 3,
         position: sim.rivals.length + 1,
         lap: 1,
-        totalLaps: mode === "race" ? 2 : 1,
+        totalLaps: raceLaps,
         bestLap: 0,
         lastLap: 0,
         driftScore: 0,
@@ -312,7 +308,6 @@ export async function createSimulation(): Promise<Simulation> {
       world.free();
       drivers = [];
       colliderDrivers.clear();
-      touchingCars.clear();
     },
   };
 
@@ -344,18 +339,10 @@ export async function createSimulation(): Promise<Simulation> {
     }
     world.step(events);
     events.drainCollisionEvents((a, b, started) => {
+      if (!started) return;
       const da = colliderDrivers.get(a);
       const db = colliderDrivers.get(b);
-      if (da && db) {
-        const key = contactKey(da, db);
-        if (!started) {
-          touchingCars.delete(key);
-          return;
-        }
-        touchingCars.set(key, { a: da, b: db, pressure: 0 });
-        handleCarContact(da, db);
-      }
-      if (!started) return;
+      if (da && db) handleCarContact(da, db);
       const playerContact =
         da?.car.id === 0 ? da : db?.car.id === 0 ? db : undefined;
       if (
@@ -367,39 +354,6 @@ export async function createSimulation(): Promise<Simulation> {
         playerContact.contactCooldown = 0.28;
       }
     });
-    for (const [key, contact] of touchingCars) {
-      const { a, b } = contact;
-      if (
-        a.car.crashTimer > 0 ||
-        b.car.crashTimer > 0 ||
-        a.car.finished ||
-        b.car.finished
-      ) {
-        touchingCars.delete(key);
-        continue;
-      }
-      const attacker = a.car.boosting ? a : b.car.boosting ? b : undefined;
-      const victim = attacker === a ? b : a;
-      const pressingForward =
-        attacker && attacker.car.distance < victim.car.distance - 1.5;
-      const pressingSide =
-        attacker &&
-        Math.abs(attacker.steer) > 0.35 &&
-        Math.sign(attacker.steer) ===
-          Math.sign(victim.car.offset - attacker.car.offset);
-      if (
-        attacker &&
-        attacker.velocityZ > 22 &&
-        victim.car.invulnerable <= 0 &&
-        (pressingForward || pressingSide)
-      ) {
-        contact.pressure += dt;
-        if (contact.pressure >= 0.16) {
-          handleCarContact(a, b, true);
-          contact.pressure = 0;
-        }
-      } else contact.pressure = 0;
-    }
     drivers.forEach((driver, index) => {
       const car = driver.car;
       if (car.finished || car.crashTimer > 0) return;
@@ -480,7 +434,7 @@ export async function createSimulation(): Promise<Simulation> {
     return `${Math.min(a.car.id, b.car.id)}:${Math.max(a.car.id, b.car.id)}`;
   }
 
-  function handleCarContact(a: Driver, b: Driver, sustainedBoost = false) {
+  function handleCarContact(a: Driver, b: Driver) {
     if (
       a.car.finished ||
       b.car.finished ||
@@ -489,7 +443,7 @@ export async function createSimulation(): Promise<Simulation> {
     )
       return;
     const key = contactKey(a, b);
-    if (!sustainedBoost && (contactCooldowns.get(key) ?? 0) > sim.elapsed)
+    if ((contactCooldowns.get(key) ?? 0) > sim.elapsed)
       return;
     const dx = b.car.offset - a.car.offset;
     const dz = b.car.distance - a.car.distance;
@@ -516,8 +470,6 @@ export async function createSimulation(): Promise<Simulation> {
       victim = attacker === a ? b : a;
       closing = Math.max(0, attacker.velocityZ - victim.velocityZ);
     }
-    if (sustainedBoost && attacker.car.boosting && victim.car.invulnerable <= 0)
-      closing = Math.max(closing, sideContact ? 2.5 : 4.5);
     if (closing < 0.8) return;
     contactCooldowns.set(key, sim.elapsed + 0.65);
     const speed = attacker.velocityZ;
@@ -527,7 +479,7 @@ export async function createSimulation(): Promise<Simulation> {
       1,
     );
     const boostedRam =
-      attacker.car.boosting && speed > 22 && closing > (sideContact ? 2 : 4);
+      attacker.car.boosting && speed > 25 && closing > (sideContact ? 5 : 9);
     const hardImpact =
       speed > (sideContact ? 48 : 42) && closing > (sideContact ? 7.5 : 18);
     const canWreck = victim.car.invulnerable <= 0 && (boostedRam || hardImpact);

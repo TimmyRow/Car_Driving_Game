@@ -1484,3 +1484,479 @@ button:disabled {
     animation: none !important;
   }
 }
+
+/* The Wayfinder Tour keeps route selection outside the driving view. */
+@media (max-height: 400px) and (orientation: landscape) {
+  .car-caption {
+    left: 32px;
+    right: auto;
+    bottom: 14px;
+  }
+}
+[hidden] {
+  display: none !important;
+}
+.mode-switch {
+  gap: 14px;
+}
+.mode-switch button {
+  letter-spacing: 1px;
+}
+.route-link {
+  display: block;
+  background: transparent;
+  color: var(--acid);
+  padding: 4px 0;
+  font: 700 10px var(--sans, Manrope, sans-serif);
+  letter-spacing: 1.2px;
+  text-align: left;
+}
+.route-link:hover {
+  color: white;
+}
+.route-panel,
+.tour-panel {
+  width: min(1040px, 96vw);
+  padding: 28px;
+}
+.picker-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+.picker-heading h2 {
+  font-size: 46px;
+  margin: 10px 0 20px;
+}
+.close-button {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #ffffff44;
+  background: #ffffff0b;
+  font: 300 29px Arial;
+  color: white;
+}
+.close-button:hover {
+  background: #ffffff24;
+}
+.route-grid,
+.tour-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.route-card {
+  padding: 0;
+  text-align: left;
+  background: #0d232c;
+  color: #f4f1df;
+  border: 1px solid #ffffff22;
+  overflow: hidden;
+  transition:
+    border-color 0.2s,
+    transform 0.2s;
+}
+.route-card:hover,
+.route-card.selected {
+  border-color: var(--route-accent);
+  transform: translateY(-3px);
+}
+.route-visual,
+.chapter-art {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(160deg, #96d9db 5%, #387f9c 55%, #132d3b);
+  color: #fff;
+}
+.route-visual:before,
+.chapter-art:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #e8ce9880;
+  clip-path: polygon(
+    0 45%,
+    12% 60%,
+    32% 38%,
+    43% 54%,
+    65% 26%,
+    84% 47%,
+    100% 38%,
+    100% 100%,
+    0 100%
+  );
+}
+.route-visual:after,
+.chapter-art:after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #1b564966;
+  clip-path: polygon(
+    0 76%,
+    23% 69%,
+    40% 79%,
+    66% 64%,
+    100% 86%,
+    100% 100%,
+    0 100%
+  );
+}
+.route-visual.canyon,
+.chapter-art.canyon {
+  background: linear-gradient(160deg, #eccdae 0%, #bf7555 50%, #6f3331);
+}
+.canyon:before {
+  background: #9b503ec0;
+  clip-path: polygon(
+    0 50%,
+    12% 50%,
+    12% 20%,
+    25% 20%,
+    31% 51%,
+    49% 53%,
+    56% 30%,
+    69% 30%,
+    72% 64%,
+    90% 47%,
+    100% 52%,
+    100% 100%,
+    0 100%
+  );
+}
+.canyon:after {
+  background: #b56b4499;
+}
+.route-visual.alpine,
+.chapter-art.alpine {
+  background: linear-gradient(145deg, #c4dce8 0%, #718fa9 60%, #304c6b);
+}
+.alpine:before {
+  background: #eef5f4ba;
+  clip-path: polygon(
+    0 82%,
+    17% 25%,
+    32% 56%,
+    51% 11%,
+    73% 71%,
+    87% 26%,
+    100% 82%,
+    100% 100%,
+    0 100%
+  );
+}
+.alpine:after {
+  background: #365e6888;
+}
+.route-visual svg,
+.chapter-art svg {
+  display: block;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 160px;
+  filter: drop-shadow(0 3px 4px #06213166);
+}
+.route-visual > span,
+.chapter-art > span {
+  position: absolute;
+  z-index: 2;
+  left: 16px;
+  top: 13px;
+  font: 800 11px var(--sans, Manrope, sans-serif);
+  letter-spacing: 1.8px;
+  text-shadow: 0 1px 5px #10252b;
+}
+.route-copy {
+  padding: 22px;
+}
+.route-copy .eyebrow {
+  font-size: 8px;
+  color: var(--route-accent);
+  letter-spacing: 2px;
+}
+.route-copy h3 {
+  font: 700 32px/1 var(--display);
+  margin: 10px 0;
+}
+.route-copy p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #bdcfce;
+  min-height: 61px;
+}
+.route-copy strong {
+  font:
+    700 10px Manrope,
+    sans-serif;
+  letter-spacing: 1.3px;
+  color: var(--route-accent);
+}
+.tour-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid #ffffff24;
+  padding: 15px 0 20px;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: #bed0cf;
+}
+#tour-medal-count {
+  color: var(--acid);
+  font-weight: 800;
+}
+.tour-chapter {
+  border: 1px solid #ffffff22;
+  background: #0b222bc9;
+  overflow: hidden;
+}
+.chapter-art svg {
+  height: 110px;
+}
+.chapter-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 15px 0;
+  gap: 8px;
+}
+.chapter-heading h3 {
+  font: 700 27px var(--display);
+  margin: 0;
+}
+.chapter-heading > span {
+  white-space: nowrap;
+  color: var(--route-accent);
+  font:
+    700 12px Manrope,
+    sans-serif;
+}
+.chapter-location {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #a4bec4;
+  padding: 0 15px;
+  margin: 6px 0 15px;
+}
+.tour-events {
+  padding: 0 12px;
+}
+.tour-event {
+  display: block;
+  text-align: left;
+  width: 100%;
+  padding: 13px 9px;
+  margin: 0 0 6px;
+  border: 1px solid #ffffff1a;
+  background: #ffffff04;
+  color: #f4f1df;
+}
+.tour-event:not(:disabled):hover {
+  border-color: var(--route-accent);
+  background: #ffffff0c;
+}
+.tour-event:disabled {
+  opacity: 0.44;
+  cursor: not-allowed;
+}
+.event-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+  font: 600 21px var(--display);
+}
+.event-title b {
+  font:
+    700 10px Manrope,
+    sans-serif;
+  color: var(--route-accent);
+  white-space: nowrap;
+}
+.event-kind,
+.event-goal {
+  display: block;
+  font:
+    500 8px/1.5 Manrope,
+    sans-serif;
+  color: #a8c3cb;
+  margin-top: 5px;
+  letter-spacing: 0.6px;
+}
+.event-goal {
+  font-size: 7px;
+  letter-spacing: 0.25px;
+  color: #d2deda;
+}
+.chapter-reward {
+  border-top: 1px solid #ffffff15;
+  margin: 14px 0 0;
+  padding: 14px 13px;
+  font:
+    700 8px/1.5 Manrope,
+    sans-serif;
+  letter-spacing: 0.6px;
+  color: var(--route-accent);
+}
+.tour-footnote {
+  font:
+    400 11px/1.8 Manrope,
+    sans-serif;
+  color: #b0c7cb;
+  margin: 17px 0 0;
+}
+.tour-result {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  border-top: 1px solid #ffffff26;
+  margin-top: 15px;
+  padding-top: 16px;
+  color: var(--acid);
+}
+.tour-result strong {
+  font: 700 31px var(--display);
+  letter-spacing: 3px;
+  white-space: nowrap;
+}
+.tour-result span {
+  font:
+    700 9px/1.7 Manrope,
+    sans-serif;
+  letter-spacing: 1px;
+}
+#results-modal:has(#tour-result:not(.hidden)) .panel {
+  width: 470px;
+  padding: 25px 30px;
+}
+#results-modal:has(#tour-result:not(.hidden)) h2 {
+  font-size: 42px;
+  margin: 12px 0 18px;
+}
+#results-modal:has(#tour-result:not(.hidden)) .result-position {
+  font-size: 76px;
+  margin: 18px 0;
+}
+#results-modal:has(#tour-result:not(.hidden)) .result-stats {
+  margin-top: 18px;
+  padding: 13px 0;
+}
+#results-modal:has(#tour-result:not(.hidden)) .result-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+#results-modal:has(#tour-result:not(.hidden)) .result-actions button {
+  margin: 0;
+  min-height: 46px;
+  padding: 12px;
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+#results-modal:has(#tour-result:not(.hidden)) #tour-next {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+#results-modal:has(#tour-result:not(.hidden)) #results-garage {
+  grid-column: 1 / -1;
+  border-color: transparent;
+  min-height: 36px;
+  padding: 7px;
+  color: #b0c7cb;
+}
+@media (max-width: 760px) {
+  .route-panel,
+  .tour-panel {
+    padding: 20px;
+    width: 94vw;
+  }
+  .picker-heading h2 {
+    font-size: 35px;
+  }
+  .route-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .route-card {
+    display: grid;
+    grid-template-columns: 38% 62%;
+  }
+  .route-visual svg {
+    height: 100%;
+    min-height: 160px;
+  }
+  .route-copy {
+    padding: 17px;
+  }
+  .route-copy h3 {
+    font-size: 27px;
+  }
+  .route-copy p {
+    font-size: 10px;
+    min-height: 0;
+    margin: 7px 0 12px;
+  }
+  .tour-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .chapter-art svg {
+    height: 95px;
+  }
+  .tour-event {
+    padding: 13px;
+  }
+  .event-title {
+    font-size: 24px;
+  }
+  .event-kind {
+    font-size: 9px;
+  }
+  .event-goal {
+    font-size: 8px;
+  }
+  .tour-summary {
+    font-size: 8px;
+    letter-spacing: 0.8px;
+  }
+}
+@media (max-height: 480px) and (min-width: 761px) {
+  .route-panel,
+  .tour-panel {
+    padding: 18px;
+  }
+  .picker-heading h2 {
+    font-size: 32px;
+    margin-bottom: 14px;
+  }
+  .route-visual svg {
+    height: 110px;
+  }
+  .route-copy {
+    padding: 15px;
+  }
+}
+@media (max-width: 420px) {
+  .mode-switch {
+    gap: 10px;
+  }
+  .mode-switch button {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+  }
+  .difficulty-badge {
+    font-size: 8px;
+    margin-left: 2px;
+  }
+  .route-visual > span {
+    font-size: 9px;
+    left: 10px;
+  }
+  .route-copy h3 {
+    font-size: 24px;
+  }
+}

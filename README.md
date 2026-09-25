@@ -1,6 +1,6 @@
 # Velocity Coast
 
-An original Three.js arcade racer around a 1.77 km Mediterranean circuit. Six drivers, two laps, drift-charged nitro, car collisions and takedowns, one-lap time attack, four paint finishes, original vehicles and scenery with photographic road/rock materials, synthesized audio, touch controls, and locally saved records/settings.
+An original Three.js arcade racer with three larger circuits and the nine-event Wayfinder Tour. Six drivers, configurable rival difficulty, drift-charged nitro, hard-impact takedowns, time attack, seven paint finishes (three earned in career), original vehicles and scenery with photographic road/rock materials, synthesized audio, touch controls, and locally saved progress, route records and settings.
 
 ## Run
 
@@ -21,19 +21,33 @@ Serve `dist/` over HTTP after building. The build uses relative asset paths and 
 
 ## Controls
 
-| Action | Keyboard | Touch |
-| --- | --- | --- |
-| Steer | Left/right or A/D | Left/right buttons |
-| Drift | Hold Space or down while steering | Hold Drift while steering |
-| Nitro | Hold Shift or X | Hold Nitro |
-| Accelerate | Automatic; W/up if disabled in Settings | Automatic |
-| Pause / resume | Escape | Pause button |
+| Action         | Keyboard                                | Touch                     |
+| -------------- | --------------------------------------- | ------------------------- |
+| Steer          | Left/right or A/D                       | Left/right buttons        |
+| Drift          | Hold Space or down while steering       | Hold Drift while steering |
+| Nitro          | Hold Shift or X                         | Hold Nitro                |
+| Accelerate     | Automatic; W/up if disabled in Settings | Automatic                 |
+| Pause / resume | Escape                                  | Pause button              |
 
 Drifting builds nitro faster. Release an empty nitro tank before activating it again. Rivals have fixed performance with no teleporting or position-dependent speed boost. Auto acceleration helps entry; overtaking and well-timed nitro determine the win.
 
-Light contact shoves cars apart. Ram a rival from behind or the side while boosting at speed to score a takedown and regain nitro. Holding nitro against a rival also builds enough pressure to break through, so an early bumper contact cannot trap a committed boost. A successful knockout preserves your momentum, throws the rival forward and triggers a brief impact stop, slow motion and a camera move. Wrecks tumble with sparks, torn panels and smoke, then recover into an open lane with brief protection from another wreck. Cinematic takedowns can be disabled in Settings; collisions and rewards still work.
+Light contact and sustained rubbing shove cars apart safely, even while boosting. A takedown requires a meaningful speed difference: a hard rear-end slam or a committed fast side impact. Nitro contact by itself never escalates into a knockout. A successful knockout preserves your momentum, throws the rival forward and triggers a brief impact stop, slow motion and a camera move. Wrecks tumble with sparks, torn panels and smoke, then recover into an open lane with brief protection from another wreck. Cinematic takedowns can be disabled in Settings; collisions and rewards still work.
 
 Settings offers Rookie, Pro (default), and Expert rivals. Higher levels increase pace, acceleration and passing reactions, and use finite nitro strategically. The selected level is saved and applies on the next race or restart; changing it during a pause does not alter the race already underway. Rivals do not teleport or receive position-based speed boosts.
+
+## Routes and career
+
+Use **Change Route** in the garage to freely select any circuit for Quick Race or Time Attack:
+
+| Circuit      | Length | Character                                                         |
+| ------------ | ------ | ----------------------------------------------------------------- |
+| Riviera Run  | 3.2 km | Mediterranean cliffs, marina, promenade and open sea              |
+| Ember Canyon | 4.2 km | Sandstone arches, layered mesas, cacti and solar research outpost |
+| Aster Ridge  | 4.1 km | Snow peaks, pine valleys, a cable viaduct and observatory         |
+
+**Career → Wayfinder Tour** contains three events per destination: a one-lap sprint, one-lap Time Attack, and two-lap cup. Finish an event to unlock the next. Complete a chapter's three events and earn at least five medals to open the next chapter. Five medals unlock that chapter's paint in the garage. Race medals reward finishing, a podium and winning; Time Attack medals use the displayed time targets. Replays retain the best result without duplicating rewards. Career events set their own difficulty. Quick Race uses the Settings selection.
+
+Career progress and records persist locally. Records are separated by route, mode, lap count and rival difficulty; the enlarged circuits begin fresh records. Route switching caches three bounded worlds and shares the four local photo textures.
 
 ## Browser presentation
 
@@ -57,13 +71,14 @@ Actual Poki Inspector validation, platform approval, thumbnail submission, and t
 
 ## Main boundaries
 
-- `src/track.ts`: arc-length sampled closed circuit.
+- `src/track.ts`: three arc-length sampled closed circuits and active-route selection.
+- `src/career.ts`: event definitions, medals, chapter gates and paint rewards.
 - `src/simulation.ts`: fixed-step racing rules and Rapier contacts.
-- `src/car.ts` and `src/world.ts`: original geometry/materials.
+- `src/car.ts`, `src/world.ts` and `src/regional-environments.ts`: original vehicles and regional environments.
 - `src/main.ts`: render/camera, HUD, input and lifecycle.
 - `src/audio.ts`: gesture-unlocked synthesis.
 - `src/crash-effects.ts`: pooled sparks and bouncing debris.
 - `src/platform.ts`: optional SDK and resilient local saves.
-- `tests/simulation.test.ts`: lifecycle, timestep, collision, nitro, balance and finish regressions.
+- `tests/`: lifecycle, contact intent, nitro, balance, route continuity, lap counts and career progression regressions.
 
 Fonts: Barlow Condensed and Manrope, distributed under the SIL Open Font License by their respective authors via Fontsource. Three.js is MIT licensed. Rapier is Apache-2.0 licensed. Photo materials are CC0 from Poly Haven; see `ASSETS.md`. Asphalt reference images remain the property of Gameloft and are used only for comparative review; they are not game assets.

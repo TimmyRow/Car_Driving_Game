@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { sampleTrack, trackLength, roadHalfWidth } from "./track";
+import { sampleTrack, trackLength, roadHalfWidth, activeTrack } from "./track";
+import {
+  createRegionalWorld,
+  addRivieraDistrict,
+} from "./regional-environments";
 
 const timeUniform = { value: 0 };
 let terrainTexture: THREE.Texture;
@@ -8,14 +12,22 @@ let terrainNormal: THREE.Texture;
 export let worldAssetsReady: Promise<void> = Promise.resolve();
 const textureLoader = new THREE.TextureLoader();
 let assetTasks: Promise<unknown>[] = [];
+const textureCache = new Map<
+  string,
+  { texture: THREE.Texture; ready: Promise<void> }
+>();
 function bundledTexture(file: string, color = true) {
+  const cached = textureCache.get(file);
+  if (cached) {
+    assetTasks.push(cached.ready);
+    return cached.texture;
+  }
   let resolve!: () => void, reject!: (reason: Error) => void;
-  assetTasks.push(
-    new Promise<void>((done, fail) => {
-      resolve = done;
-      reject = fail;
-    }),
-  );
+  const ready = new Promise<void>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  assetTasks.push(ready);
   const t = textureLoader.load(
     `${import.meta.env.BASE_URL}textures/${file}`,
     () => resolve(),
@@ -25,6 +37,8 @@ function bundledTexture(file: string, color = true) {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.anisotropy = 8;
   if (color) t.colorSpace = THREE.SRGBColorSpace;
+  t.userData.shared = true;
+  textureCache.set(file, { texture: t, ready });
   return t;
 }
 const islandCenter = new THREE.Vector2();
@@ -91,6 +105,20 @@ const palmMat = new THREE.MeshStandardMaterial({
 });
 const wood = new THREE.MeshStandardMaterial({ color: "#867359", roughness: 1 });
 const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
+boxGeometry.userData.shared = true;
+for (const material of [
+  cream,
+  chalk,
+  stone,
+  charcoal,
+  ink,
+  acid,
+  windowMat,
+  terracotta,
+  palmMat,
+  wood,
+])
+  material.userData.shared = true;
 function mesh(
   group: THREE.Object3D,
   geometry: THREE.BufferGeometry,
@@ -578,8 +606,17 @@ export function createWorld(): THREE.Group {
   asphaltTexture.repeat.set(3, 20 / 6);
   asphaltNormal.repeat.copy(asphaltTexture.repeat);
   worldAssetsReady = Promise.all(assetTasks).then(() => undefined);
+  const assets = {
+    rock: terrainTexture,
+    normal: terrainNormal,
+    asphalt: asphaltTexture,
+    asphaltNormal,
+  };
+  if (activeTrack.theme !== "riviera")
+    return createRegionalWorld(activeTrack.theme, assets);
   const world = new THREE.Group();
-  world.name = "Cap Azzurra";
+  world.name = activeTrack.name;
+  world.userData.theme = activeTrack.theme;
   const steps = Math.ceil(trackLength / 2.8);
   const asphalt = new THREE.MeshStandardMaterial({
     map: asphaltTexture,
@@ -616,8 +653,15 @@ export function createWorld(): THREE.Group {
   const dummy = new THREE.Object3D();
   for (let i = 0; i < dashCount; i++) {
     const p = sampleTrack(i * 15);
+    const a = sampleTrack(i * 15 - 2),
+      b = sampleTrack(i * 15 + 2);
     dummy.position.set(p.x, p.y + 0.026, p.z);
-    dummy.rotation.set(0, p.heading, 0);
+    dummy.rotation.set(
+      -Math.atan2(b.y - a.y, Math.hypot(b.x - a.x, b.z - a.z)),
+      p.heading,
+      0,
+      "YXZ",
+    );
     dummy.scale.set(0.14, 0.015, 4);
     dummy.updateMatrix();
     dashes.setMatrixAt(i, dummy.matrix);
@@ -774,7 +818,7 @@ export function createWorld(): THREE.Group {
     g.translate(Math.cos(a) * 3.1, (i % 3) * 0.32, Math.sin(a) * 2.9);
     pineParts.push(g);
   }
-  const pineCount = 155,
+  const pineCount = 260,
     pineLeaves = new THREE.InstancedMesh(
       mergeGeometries(pineParts)!,
       new THREE.MeshStandardMaterial({ color: "#38563d", roughness: 1 }),
@@ -825,7 +869,7 @@ export function createWorld(): THREE.Group {
     boulderPositions.setXYZ(i, x * scale, y * scale, z * scale);
   }
   boulderGeometry.computeVertexNormals();
-  const rockCount = 110,
+  const rockCount = 170,
     rocks = new THREE.InstancedMesh(boulderGeometry, rockMaterial, rockCount);
   for (let i = 0; i < rockCount; i++) {
     const d = rand() * trackLength,
@@ -843,9 +887,9 @@ export function createWorld(): THREE.Group {
   const hillsideRocks = new THREE.InstancedMesh(
     boulderGeometry,
     rockMaterial,
-    185,
+    270,
   );
-  for (let i = 0; i < 185; i++) {
+  for (let i = 0; i < 270; i++) {
     const p = sampleTrack(rand() * trackLength, 10.2),
       f = 0.02 + rand() * 0.31,
       x = THREE.MathUtils.lerp(p.x, islandCenter.x, f),
@@ -862,9 +906,9 @@ export function createWorld(): THREE.Group {
   const bushes = new THREE.InstancedMesh(
     new THREE.IcosahedronGeometry(1, 1),
     palmMat,
-    130,
+    200,
   );
-  for (let i = 0; i < 130; i++) {
+  for (let i = 0; i < 200; i++) {
     const d = rand() * trackLength,
       lateral = 12 + rand() * 14,
       p = sampleTrack(d, lateral),
@@ -892,6 +936,7 @@ export function createWorld(): THREE.Group {
       i,
     );
   lighthouse(village);
+  addRivieraDistrict(world, assets);
   // Race architecture: a purposeful lime ribbon at the start, not a floating sign.
   const start = sampleTrack(0),
     gantry = new THREE.Group();
@@ -908,7 +953,7 @@ export function createWorld(): THREE.Group {
   const title = sign(
     gantry,
     "VELOCITY / COAST",
-    "CAP AZZURRA  •  GRAND PRIX",
+    "PORT LUMIÈRE  •  COASTAL EXPEDITION",
     19.4,
     1.7,
     [0, 7.24, -0.513],
@@ -918,7 +963,7 @@ export function createWorld(): THREE.Group {
   sign(
     gantry,
     "VELOCITY / COAST",
-    "CAP AZZURRA  •  GRAND PRIX",
+    "PORT LUMIÈRE  •  COASTAL EXPEDITION",
     19.4,
     1.7,
     [0, 7.24, 0.513],
@@ -942,8 +987,8 @@ export function createWorld(): THREE.Group {
     for (const x of [-2.4, 2.4]) box(g, ink, [0.12, 3, 0.12], [x, 1.5, 0]);
     const board = sign(
       g,
-      i % 2 ? "AZZURRA" : "APEX / 01",
-      i % 2 ? "THE COAST IS YOURS" : "PERFORMANCE DIVISION",
+      i % 2 ? "LUMIÈRE" : "COAST / 01",
+      i % 2 ? "THE COAST IS YOURS" : "COASTAL EXPEDITION",
       5.7,
       1.4,
       [0, 2.4, 0],
@@ -1058,4 +1103,33 @@ export function createWorld(): THREE.Group {
 }
 export function updateWorld(time: number) {
   timeUniform.value = time;
+}
+
+/** Cached worlds may be released independently; shared photo assets stay reusable. */
+export function disposeWorld(group: THREE.Group) {
+  const geometries = new Set<THREE.BufferGeometry>(),
+    materials = new Set<THREE.Material>(),
+    textures = new Set<THREE.Texture>();
+  group.traverse((object) => {
+    if (
+      !(object instanceof THREE.Mesh) &&
+      !(object instanceof THREE.LineSegments)
+    )
+      return;
+    if (!object.geometry.userData.shared) geometries.add(object.geometry);
+    for (const material of Array.isArray(object.material)
+      ? object.material
+      : [object.material]) {
+      if (material.userData.shared) continue;
+      materials.add(material);
+      for (const value of Object.values(material))
+        if (value instanceof THREE.Texture && !value.userData.shared)
+          textures.add(value);
+    }
+  });
+  geometries.forEach((g) => g.dispose());
+  materials.forEach((m) => m.dispose());
+  textures.forEach((t) => t.dispose());
+  group.removeFromParent();
+  group.clear();
 }

@@ -7,7 +7,28 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { createWorld, updateWorld, worldAssetsReady } from "./world";
 import { createCar } from "./car";
-import { sampleTrack, trackLength, trackPoints } from "./track";
+import {
+  sampleTrack,
+  trackLength,
+  trackPoints,
+  activeTrack,
+  TRACKS,
+  getTrack,
+  selectTrack,
+  type TrackId,
+} from "./track";
+import {
+  TOUR_EVENTS,
+  TOUR_CHAPTERS,
+  readCareer,
+  totalMedals,
+  chapterMedals,
+  eventUnlocked,
+  awardEvent,
+  unlockedPaints,
+  eventGoal,
+  type TourEvent,
+} from "./career";
 import {
   createSimulation,
   type Controls,
@@ -43,7 +64,22 @@ const settings = readSave("settings", {
   paint: "#f05b27",
   difficulty: "pro" as Difficulty,
   cinematic: true,
+  track: "riviera" as TrackId,
 });
+settings.track = getTrack(settings.track).id;
+selectTrack(settings.track);
+let career = readCareer(readSave("career", null));
+let selectedEvent: TourEvent | undefined;
+let activeEvent: TourEvent | undefined;
+const savedRecords = readSave<unknown>("records-v3", {});
+const records: Record<string, number> = Object.fromEntries(
+  Object.entries(
+    savedRecords && typeof savedRecords === "object" ? savedRecords : {},
+  ).filter(
+    ([, value]) =>
+      typeof value === "number" && Number.isFinite(value) && value > 0,
+  ),
+);
 if (!["rookie", "pro", "expert"].includes(settings.difficulty))
   settings.difficulty = "pro";
 if (typeof settings.cinematic !== "boolean") settings.cinematic = true;
@@ -52,14 +88,26 @@ const difficultyDescriptions = {
   pro: "Fast rivals who pass traffic and time their nitro.",
   expert: "Relentless pace, assertive passing and sustained pressure.",
 };
-const validPaints = ["#f05b27", "#dfeaf0", "#12b7c1", "#e5ff54"];
-if (!validPaints.includes(settings.paint)) settings.paint = validPaints[0];
+const validPaints = [
+  "#f05b27",
+  "#dfeaf0",
+  "#12b7c1",
+  "#e5ff54",
+  ...TOUR_CHAPTERS.map((c) => c.paint),
+];
+if (
+  !validPaints
+    .slice(0, 4)
+    .concat(unlockedPaints(career))
+    .includes(settings.paint)
+)
+  settings.paint = validPaints[0];
 if (!["high", "medium", "low"].includes(settings.quality))
   settings.quality = "high";
-let personalBest = readSave<number>("best", 0),
-  trialBest = readSave<number>("trial-best", 0);
 let selectedMode: RaceMode = "race",
-  screen: "menu" | "race" | "pause" | "settings" | "results" = "menu";
+  screen:
+    "menu" | "race" | "pause" | "settings" | "results" | "tracks" | "tour" =
+    "menu";
 let settingsReturn: "menu" | "pause" = "menu";
 const audio = new RaceAudio();
 audio.muted = settings.muted;
@@ -73,14 +121,16 @@ document.querySelector("#app")!.innerHTML = `
   <section id="menu" class="layer hidden" aria-label="Main menu">
     <div class="menu-shade"></div>
     <header class="masthead"><div class="brand"><i class="brand-mark"></i>VELOCITY <span class="edition"> / COAST</span></div><div class="top-actions"><button class="icon-button" id="sound" aria-label="Toggle sound">${soundIcon}</button><button class="icon-button" id="settings-open" aria-label="Settings">${gearIcon}</button><button class="icon-button" id="fullscreen" aria-label="Full screen">${fullIcon}</button></div></header>
-    <div class="hero"><div class="eyebrow">The coast is calling</div><h1>VELOCITY<span>COAST</span></h1><p class="tagline">Find your line. Feel the rush.<br>Leave everything else behind.</p><div class="race-options"><div class="mode-switch" role="group" aria-label="Race mode"><button class="active" data-mode="race" aria-pressed="true">QUICK RACE <span class="difficulty-badge" id="menu-difficulty">PRO</span></button><button data-mode="time-trial" aria-pressed="false">TIME ATTACK</button></div></div><button id="race-start" class="race-button"><span>LET’S RACE</span><span class="arrow">↗</span></button><div class="controls-line"><kbd>← →</kbd> STEER &nbsp; <kbd>SPACE</kbd> DRIFT &nbsp; <kbd>SHIFT</kbd> NITRO</div></div>
-    <div class="car-caption"><div class="car-number">01</div><div><strong>APEX GT</strong><p>PURE PERFORMANCE. ZERO COMPROMISE.</p><div class="swatches" role="group" aria-label="Car paint">${validPaints.map((paint, i) => `<button class="swatch ${paint === settings.paint ? "selected" : ""}" style="--paint:${paint}" data-paint="${paint}" aria-label="${["Volcanic orange", "Glacier white", "Lagoon blue", "Acid yellow"][i]} paint" aria-pressed="${paint === settings.paint}"></button>`).join("")}</div></div></div><div class="edition-label">THE HORIZON COLLECTION — 01 / 26</div>
-    <footer class="menu-footer"><div class="circuit-summary"><canvas class="circuit-map" id="menu-map" width="224" height="140"></canvas><div><span class="small">FEATURED CIRCUIT / 01</span><h2>RIVIERA RUN</h2><p id="circuit-description">${(trackLength / 1000).toFixed(1)} KM &nbsp; • &nbsp; 2 LAPS &nbsp; • &nbsp; 6 DRIVERS</p></div></div><div class="session-best">PERSONAL BEST<b id="menu-best">— : —</b></div></footer>
+    <div class="hero"><div class="eyebrow">The coast is calling</div><h1>VELOCITY<span>COAST</span></h1><p class="tagline">Three horizons. One open road.<br>Make every mile yours.</p><div class="race-options"><div class="mode-switch" role="group" aria-label="Race mode"><button class="active" data-mode="race" aria-pressed="true">QUICK RACE <span class="difficulty-badge" id="menu-difficulty">PRO</span></button><button data-mode="time-trial" aria-pressed="false">TIME ATTACK</button><button id="tour-open">CAREER <span class="difficulty-badge">TOUR</span></button></div></div><button id="race-start" class="race-button"><span>LET’S RACE</span><span class="arrow">↗</span></button><div class="controls-line"><kbd>← →</kbd> STEER &nbsp; <kbd>SPACE</kbd> DRIFT &nbsp; <kbd>SHIFT</kbd> NITRO</div></div>
+    <div class="car-caption"><div class="car-number">01</div><div><strong>APEX GT</strong><p>PURE PERFORMANCE. ZERO COMPROMISE.</p><div class="swatches" role="group" aria-label="Car paint">${validPaints.map((paint, i) => `<button class="swatch ${paint === settings.paint ? "selected" : ""}" style="--paint:${paint}" data-paint="${paint}" aria-label="${["Volcanic orange", "Glacier white", "Lagoon blue", "Acid yellow", ...TOUR_CHAPTERS.map((c) => c.reward)][i]} paint" aria-pressed="${paint === settings.paint}"></button>`).join("")}</div></div></div><div class="edition-label">THE HORIZON COLLECTION — 01 / 26</div>
+    <footer class="menu-footer"><div class="circuit-summary"><canvas class="circuit-map" id="menu-map" width="224" height="140"></canvas><div><span class="small" id="menu-track-index">FEATURED CIRCUIT / 01</span><h2 id="menu-track-title">RIVIERA RUN</h2><button class="route-link" id="tracks-open">CHANGE ROUTE ↗</button><p id="circuit-description">${(trackLength / 1000).toFixed(1)} KM &nbsp; • &nbsp; 2 LAPS &nbsp; • &nbsp; 6 DRIVERS</p></div></div><div class="session-best">PERSONAL BEST<b id="menu-best">— : —</b></div></footer>
   </section>
-  <section id="hud" class="layer hud hidden" aria-label="Race information"><div class="hud-top"><div class="race-position"><div class="position-value"><span id="position">6</span><small id="field-size"> / 6</small></div><div class="race-details"><label>RIVIERA RUN</label><strong id="race-mode-label">COASTAL SPRINT</strong><span class="lap-pill">LAP <span id="lap">1 / 2</span></span></div></div><div class="hud-top-right"><div class="clock"><small>RACE TIME</small><span id="race-time">00:00.00</span></div><button class="icon-button" id="pause" aria-label="Pause race">${pauseIcon}</button></div></div><div class="mini-map"><canvas id="race-map" width="332" height="252"></canvas><p>RIVIERA RUN</p></div><div class="speedometer"><div class="speed-row"><span class="gear" id="gear">N</span><span class="speed-number" id="speed">000</span><span class="speed-unit">KM/H</span></div><div class="nitro-title"><span>NITRO</span><span id="nitro-state">SHIFT</span></div><div class="nitro-track"><div class="nitro-fill"></div></div></div><div class="race-feedback"><div class="feedback-title" id="feedback"></div><div class="feedback-sub" id="feedback-sub"></div></div><div class="countdown hidden"><span id="countdown-value">3</span><div class="countdown-label">MAKE THE COAST YOURS</div></div><div class="race-hint" id="race-hint">AUTO ACCELERATE &nbsp; / &nbsp; ← → STEER &nbsp; / &nbsp; SPACE + STEER TO DRIFT</div><div class="touch-controls"><div><button class="touch-btn" data-control="left" aria-label="Steer left">‹</button><button class="touch-btn" data-control="right" aria-label="Steer right">›</button></div><div><button class="touch-btn drift" data-control="brake" aria-label="Brake and drift">DRIFT</button><button class="touch-btn boost" data-control="nitro" aria-label="Nitro boost">NITRO</button></div></div></section>
+  <section id="hud" class="layer hud hidden" aria-label="Race information"><div class="hud-top"><div class="race-position"><div class="position-value"><span id="position">6</span><small id="field-size"> / 6</small></div><div class="race-details"><label id="hud-track-label">RIVIERA RUN</label><strong id="race-mode-label">QUICK RACE</strong><span class="lap-pill">LAP <span id="lap">1 / 2</span></span></div></div><div class="hud-top-right"><div class="clock"><small>RACE TIME</small><span id="race-time">00:00.00</span></div><button class="icon-button" id="pause" aria-label="Pause race">${pauseIcon}</button></div></div><div class="mini-map"><canvas id="race-map" width="332" height="252"></canvas><p id="map-track-label">RIVIERA RUN</p></div><div class="speedometer"><div class="speed-row"><span class="gear" id="gear">N</span><span class="speed-number" id="speed">000</span><span class="speed-unit">KM/H</span></div><div class="nitro-title"><span>NITRO</span><span id="nitro-state">SHIFT</span></div><div class="nitro-track"><div class="nitro-fill"></div></div></div><div class="race-feedback"><div class="feedback-title" id="feedback"></div><div class="feedback-sub" id="feedback-sub"></div></div><div class="countdown hidden"><span id="countdown-value">3</span><div class="countdown-label">MAKE THE ROAD YOURS</div></div><div class="race-hint" id="race-hint">AUTO ACCELERATE &nbsp; / &nbsp; ← → STEER &nbsp; / &nbsp; SPACE + STEER TO DRIFT</div><div class="touch-controls"><div><button class="touch-btn" data-control="left" aria-label="Steer left">‹</button><button class="touch-btn" data-control="right" aria-label="Steer right">›</button></div><div><button class="touch-btn drift" data-control="brake" aria-label="Brake and drift">DRIFT</button><button class="touch-btn boost" data-control="nitro" aria-label="Nitro boost">NITRO</button></div></div></section>
   <section id="pause-modal" class="layer modal-backdrop hidden" aria-label="Race paused"><div class="panel"><div class="eyebrow">Take a breath</div><h2>THE COAST<br>CAN WAIT.</h2><button class="race-button" id="resume"><span>BACK TO THE RACE</span><span>↗</span></button><button class="secondary-button" id="restart">RESTART RACE</button><button class="secondary-button" id="pause-settings">SETTINGS</button><button class="secondary-button" id="quit">BACK TO GARAGE</button></div></section>
   <section id="settings-modal" class="layer modal-backdrop hidden" aria-label="Settings"><div class="panel"><div class="eyebrow">Make it yours</div><h2>FINE TUNE.</h2><label class="settings-row">Rival difficulty<select id="difficulty" aria-describedby="difficulty-description"><option value="rookie">Rookie</option><option value="pro">Pro</option><option value="expert">Expert</option></select></label><p class="setting-description" id="difficulty-description"></p><label class="settings-row">Cinematic takedowns<input type="checkbox" id="cinematic-setting" ${settings.cinematic ? "checked" : ""}></label><label class="settings-row">Sound effects<input type="checkbox" id="sound-setting" ${!settings.muted ? "checked" : ""}></label><label class="settings-row">Graphics quality<select id="quality"><option value="high">Ultra</option><option value="medium">Balanced</option><option value="low">Performance</option></select></label><label class="settings-row auto-row">Auto accelerate<input type="checkbox" id="auto-setting" ${settings.auto ? "checked" : ""}></label><p class="control-guide">← → or A D — Steer<br>Space or ↓ — Brake / hold while steering to drift<br>Shift or X — Nitro &nbsp; · &nbsp; Esc — Pause<br>W / ↑ — Accelerate when auto is off<br>Touch: steering, drift and nitro buttons. Auto accelerate is always on.</p><button class="race-button" id="settings-close"><span>ALL SET</span><span>↗</span></button></div></section>
-  <section id="results-modal" class="layer modal-backdrop hidden" aria-label="Race results"><div class="panel"><div class="eyebrow" id="result-kicker">Finish line crossed</div><h2 id="result-title">WHAT A RIDE.</h2><div class="result-position" id="result-position">1<small>ST PLACE</small></div><div class="result-stats"><div><label>RACE TIME</label><strong id="result-time">—</strong></div><div><label>BEST LAP</label><strong id="result-lap">—</strong></div><div><label>DRIFT PTS</label><strong id="result-drift">0</strong></div></div><p class="new-best" id="new-best"></p><button class="race-button" id="race-again"><span>ONE MORE RUN</span><span>↗</span></button><button class="secondary-button" id="results-garage">BACK TO GARAGE</button></div></section>
+  <section id="results-modal" class="layer modal-backdrop hidden" aria-label="Race results"><div class="panel"><div class="eyebrow" id="result-kicker">Finish line crossed</div><h2 id="result-title">WHAT A RIDE.</h2><div class="result-position" id="result-position">1<small>ST PLACE</small></div><div class="result-stats"><div><label>RACE TIME</label><strong id="result-time">—</strong></div><div><label>BEST LAP</label><strong id="result-lap">—</strong></div><div><label>DRIFT PTS</label><strong id="result-drift">0</strong></div></div><p class="new-best" id="new-best"></p><div id="tour-result" class="tour-result hidden"></div><div class="result-actions"><button class="race-button hidden" id="tour-next"><span>NEXT EVENT</span><span>↗</span></button><button class="secondary-button hidden" id="tour-return">BACK TO TOUR</button><button class="race-button" id="race-again"><span>ONE MORE RUN</span><span>↗</span></button><button class="secondary-button" id="results-garage">BACK TO GARAGE</button></div></div></section>
+  <section id="tracks-modal" class="layer modal-backdrop hidden" aria-label="Choose route"><div class="panel route-panel"><div class="picker-heading"><div><div class="eyebrow">Explore the open road</div><h2>THREE HORIZONS.</h2></div><button class="close-button" id="tracks-close" aria-label="Close routes">×</button></div><div class="route-grid" id="route-grid"></div></div></section>
+  <section id="tour-modal" class="layer modal-backdrop hidden" aria-label="Wayfinder career"><div class="panel tour-panel"><div class="picker-heading"><div><div class="eyebrow">Your road to the summit</div><h2>WAYFINDER TOUR.</h2></div><button class="close-button" id="tour-close" aria-label="Close career">×</button></div><div class="tour-summary"><span id="tour-medal-count">0 / 27 MEDALS</span><span>9 EVENTS · 3 CHAPTERS</span></div><div class="tour-grid" id="tour-grid"></div><p class="tour-footnote">Finish an event to open the next. Complete all 3 events and earn 5 medals to open the next destination. Each chapter’s paint unlocks at 5 medals.</p></div></section>
   <section id="loading" class="layer loading"><div><i class="brand-mark"></i><h1>VELOCITY COAST</h1><p id="load-message">WARMING UP THE ENGINE</p><div class="load-line"></div></div></section>`;
 
 function timeLabel(seconds: number) {
@@ -90,8 +140,35 @@ function timeLabel(seconds: number) {
 }
 function updateBest() {
   $("#menu-best").textContent = timeLabel(
-    selectedMode === "race" ? personalBest : trialBest,
+    records[
+      recordKey(
+        selectedMode,
+        selectedMode === "race" ? 2 : 1,
+        settings.difficulty,
+      )
+    ] ?? 0,
   );
+}
+function recordKey(mode: RaceMode, laps: number, difficulty: Difficulty) {
+  return `${activeTrack.id}:${mode}:${laps}:${mode === "race" ? difficulty : "solo"}`;
+}
+function routeMapSvg(id: TrackId) {
+  const points = getTrack(id).points;
+  const xs = points.map((p) => p.x),
+    zs = points.map((p) => p.z);
+  const minX = Math.min(...xs),
+    maxX = Math.max(...xs),
+    minZ = Math.min(...zs),
+    maxZ = Math.max(...zs);
+  const scale = Math.min(210 / (maxX - minX), 98 / (maxZ - minZ));
+  const project = (p: { x: number; z: number }) =>
+    `${(125 + (p.x - (minX + maxX) / 2) * scale).toFixed(1)},${(62 - (p.z - (minZ + maxZ) / 2) * scale).toFixed(1)}`;
+  const line = points
+    .filter((_, i) => i % 16 === 0)
+    .map(project)
+    .join(" ");
+  const [x, y] = project(points[0]).split(",");
+  return `<svg viewBox="0 0 250 124" aria-hidden="true"><polyline points="${line}" fill="none" stroke="#071e2d99" stroke-width="7"/><polyline points="${line}" fill="none" stroke="currentColor" stroke-width="2.8"/><circle cx="${x}" cy="${y}" r="4" fill="#e5ff54" stroke="#10252b" stroke-width="1.5"/></svg>`;
 }
 updateBest();
 if (touch) {
@@ -112,30 +189,47 @@ async function boot() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.9;
+  renderer.toneMappingExposure = activeTrack.lighting.exposure;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#a3c9d6");
-  scene.fog = new THREE.FogExp2("#a3c9d6", 0.0004);
+  scene.background = new THREE.Color(activeTrack.lighting.fog);
+  scene.fog = new THREE.FogExp2(
+    activeTrack.lighting.fog,
+    activeTrack.lighting.density,
+  );
   const camera = new THREE.PerspectiveCamera(
     49,
     innerWidth / innerHeight,
     0.2,
     5000,
   );
-  const sunPosition = new THREE.Vector3(-0.58, 0.54, -0.61).normalize();
+  const sunPosition = new THREE.Vector3(
+    ...activeTrack.lighting.direction,
+  ).normalize();
   const skyMaterial = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
-    uniforms: { sunDirection: { value: sunPosition } },
+    uniforms: {
+      sunDirection: { value: sunPosition },
+      horizonColor: {
+        value: new THREE.Color(
+          activeTrack.lighting.horizon,
+        ).convertLinearToSRGB(),
+      },
+      zenithColor: {
+        value: new THREE.Color(
+          activeTrack.lighting.zenith,
+        ).convertLinearToSRGB(),
+      },
+    },
     vertexShader:
       "varying vec3 vDirection;void main(){vDirection=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}",
     fragmentShader: `
-    varying vec3 vDirection;uniform vec3 sunDirection;
+    varying vec3 vDirection;uniform vec3 sunDirection;uniform vec3 horizonColor;uniform vec3 zenithColor;
     float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
     float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+1.),f.x),f.y);}
     float fbm(vec2 p){return noise(p)*.5+noise(p*2.03)*.25+noise(p*4.07)*.125+noise(p*8.11)*.0625;}
-    void main(){vec3 d=normalize(vDirection);float elevation=max(d.y,0.);vec3 col=mix(vec3(.51,.72,.78),vec3(.08,.39,.65),pow(elevation,.45));
+    void main(){vec3 d=normalize(vDirection);float elevation=max(d.y,0.);vec3 col=mix(horizonColor,zenithColor,pow(elevation,.45));
     vec2 uv=d.xz/(max(.08,d.y)+.18)*2.7;float clouds=smoothstep(.51,.73,fbm(uv))*smoothstep(.04,.19,d.y)*(1.-smoothstep(.70,.95,d.y));col=mix(col,vec3(.93,.92,.84),clouds*.83);
     float sun=max(dot(d,sunDirection),0.);col+=vec3(.8,.59,.3)*pow(sun,35.)*.28+vec3(1.9,1.5,.95)*pow(sun,1700.);gl_FragColor=vec4(col,1.);
     #include <tonemapping_fragment>
@@ -156,7 +250,7 @@ async function boot() {
   room.dispose();
   pmrem.dispose();
   scene.add(new THREE.HemisphereLight("#bde5ff", "#968464", 1.0));
-  const sunlight = new THREE.DirectionalLight("#fff1d2", 2.65);
+  const sunlight = new THREE.DirectionalLight(activeTrack.lighting.sun, 2.65);
   sunlight.castShadow = true;
   sunlight.shadow.mapSize.set(2048, 2048);
   sunlight.shadow.camera.left = -65;
@@ -169,7 +263,8 @@ async function boot() {
   sunlight.shadow.normalBias = 0.035;
   sunlight.shadow.radius = 3;
   scene.add(sunlight, sunlight.target);
-  const world = createWorld();
+  let world = createWorld();
+  const worlds = new Map<TrackId, THREE.Group>([[activeTrack.id, world]]);
   scene.add(world);
   const sim = await createSimulation();
   const playerCar = createCar(settings.paint);
@@ -257,6 +352,7 @@ async function boot() {
     driftCombo = 0,
     ready = true,
     adPending = false;
+  let switchingTrack = false;
   let feedbackTimer = 0,
     feedbackTitle = "",
     feedbackSub = "";
@@ -290,10 +386,15 @@ async function boot() {
   function showScreen(next: typeof screen) {
     screen = next;
     $("#menu").classList.toggle("hidden", next !== "menu");
-    $("#hud").classList.toggle("hidden", next === "menu");
+    $("#hud").classList.toggle(
+      "hidden",
+      next === "menu" || next === "tracks" || next === "tour",
+    );
     $("#pause-modal").classList.toggle("hidden", next !== "pause");
     $("#settings-modal").classList.toggle("hidden", next !== "settings");
     $("#results-modal").classList.toggle("hidden", next !== "results");
+    $("#tracks-modal").classList.toggle("hidden", next !== "tracks");
+    $("#tour-modal").classList.toggle("hidden", next !== "tour");
     if (next !== "race") {
       clearInput();
       gameplay(false);
@@ -327,11 +428,16 @@ async function boot() {
     }
   }
   async function startRace() {
-    if (adPending) return;
+    if (adPending || switchingTrack) return;
     void audio.unlock().catch(() => {});
     audio.setMuted(settings.muted);
     clearInput();
-    sim.reset(selectedMode, settings.difficulty);
+    activeEvent = selectedEvent;
+    sim.reset(
+      selectedMode,
+      activeEvent?.difficulty ?? settings.difficulty,
+      activeEvent?.laps,
+    );
     sim.start();
     lastCollisionId = 0;
     crashes.clear();
@@ -351,9 +457,10 @@ async function boot() {
     trailGeometry.setDrawRange(0, 0);
     showScreen("race");
     gameplay(true);
-    $("#race-mode-label").textContent =
-      selectedMode === "race"
-        ? `COASTAL SPRINT · ${sim.difficulty.toUpperCase()}`
+    $("#race-mode-label").textContent = activeEvent
+      ? activeEvent.title.toUpperCase()
+      : selectedMode === "race"
+        ? `QUICK RACE · ${sim.difficulty.toUpperCase()}`
         : "TIME ATTACK";
     $("#field-size").textContent = selectedMode === "race" ? " / 6" : " / 1";
     $("#race-hint").textContent = touch
@@ -388,6 +495,8 @@ async function boot() {
     lastTime = performance.now();
   }
   function garage() {
+    activeEvent = undefined;
+    selectedEvent = undefined;
     showScreen("menu");
     sim.reset(selectedMode, settings.difficulty);
     crashes.clear();
@@ -404,6 +513,146 @@ async function boot() {
     contactShadows.slice(1).forEach((c) => (c.visible = false));
     cameraInitialized = false;
     updateBest();
+    updateRouteUI();
+  }
+  function updateRouteUI() {
+    $("#menu-track-title").textContent = activeTrack.name.toUpperCase();
+    $("#menu-track-index").textContent =
+      `FEATURED CIRCUIT / 0${TRACKS.indexOf(activeTrack) + 1}`;
+    $("#hud-track-label").textContent = activeTrack.name.toUpperCase();
+    $("#map-track-label").textContent = activeTrack.name.toUpperCase();
+    $("#circuit-description").textContent =
+      `${(trackLength / 1000).toFixed(1)} KM  •  ${selectedMode === "race" ? "2 LAPS  •  6 DRIVERS" : "1 LAP  •  SOLO"}`;
+    document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => {
+      const chosen = b.dataset.mode === selectedMode;
+      b.classList.toggle("active", chosen);
+      b.setAttribute("aria-pressed", String(chosen));
+    });
+    updateBest();
+  }
+  function updatePaints() {
+    const allowed = validPaints.slice(0, 4).concat(unlockedPaints(career));
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-paint]")
+      .forEach((button) => {
+        const available = allowed.includes(button.dataset.paint!);
+        button.hidden = !available;
+        button.disabled = !available;
+      });
+  }
+  async function switchRoute(id: TrackId) {
+    if (switchingTrack) return false;
+    if (id === activeTrack.id) return true;
+    const oldId = activeTrack.id,
+      oldWorld = world;
+    switchingTrack = true;
+    $("#loading").classList.remove("hidden");
+    $("#load-message").textContent =
+      `HEADING TO ${getTrack(id).name.toUpperCase()}`;
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
+    ready = false;
+    try {
+      selectTrack(id);
+      let next = worlds.get(id);
+      if (!next) {
+        next = createWorld();
+        next.visible = false;
+        scene.add(next);
+        await worldAssetsReady;
+        worlds.set(id, next);
+      }
+      oldWorld.visible = false;
+      world = next;
+      world.visible = true;
+      const light = activeTrack.lighting;
+      skyMaterial.uniforms.horizonColor.value
+        .set(light.horizon)
+        .convertLinearToSRGB();
+      skyMaterial.uniforms.zenithColor.value
+        .set(light.zenith)
+        .convertLinearToSRGB();
+      sunPosition.set(...light.direction).normalize();
+      sunlight.color.set(light.sun);
+      scene.background = new THREE.Color(light.fog);
+      (scene.fog as THREE.FogExp2).color.set(light.fog);
+      (scene.fog as THREE.FogExp2).density = light.density;
+      renderer.toneMappingExposure = light.exposure;
+      settings.track = id;
+      writeSave("settings", settings);
+      sim.reset(selectedMode, settings.difficulty);
+      crashes.clear();
+      clearParticles();
+      knockoutAge = Infinity;
+      cameraInitialized = false;
+      mapBounds = computeMapBounds();
+      drawMap(menuMap, false);
+      updateRouteUI();
+      return true;
+    } catch (error) {
+      console.error(error);
+      selectTrack(oldId);
+      world = oldWorld;
+      world.visible = true;
+      return false;
+    } finally {
+      ready = true;
+      switchingTrack = false;
+      lastTime = performance.now();
+      $("#loading").classList.add("hidden");
+    }
+  }
+  function showRoutes() {
+    $("#route-grid").innerHTML = TRACKS.map(
+      (track) =>
+        `<button class="route-card ${track.id === activeTrack.id ? "selected" : ""}" data-route="${track.id}" style="--route-accent:${track.accent}"><div class="route-visual ${track.theme}">${routeMapSvg(track.id)}<span>${(track.length / 1000).toFixed(1)} KM</span></div><div class="route-copy"><span class="eyebrow">${track.region}</span><h3>${track.name.toUpperCase()}</h3><p>${track.description}</p><strong>${track.id === activeTrack.id ? "SELECTED" : "EXPLORE ROUTE ↗"}</strong></div></button>`,
+    ).join("");
+    document.querySelectorAll<HTMLButtonElement>("[data-route]").forEach(
+      (button) =>
+        (button.onclick = async () => {
+          if (await switchRoute(button.dataset.route as TrackId)) {
+            selectedEvent = undefined;
+            garage();
+          }
+        }),
+    );
+    showScreen("tracks");
+  }
+  function showTour() {
+    $("#tour-medal-count").textContent = `${totalMedals(career)} / 27 MEDALS`;
+    $("#tour-grid").innerHTML = TOUR_CHAPTERS.map((chapter, i) => {
+      const track = getTrack(chapter.trackId),
+        medals = chapterMedals(career, i);
+      return `<section class="tour-chapter" style="--route-accent:${track.accent}"><div class="chapter-art ${track.theme}">${routeMapSvg(track.id)}<span>CHAPTER 0${i + 1}</span></div><div class="chapter-heading"><h3>${chapter.name.toUpperCase()}</h3><span>${medals} / 9 ★</span></div><p class="chapter-location">${track.name.toUpperCase()} · ${(track.length / 1000).toFixed(1)} KM</p><div class="tour-events">${TOUR_EVENTS.slice(
+        i * 3,
+        i * 3 + 3,
+      )
+        .map((event) => {
+          const unlocked = eventUnlocked(career, event.id),
+            stars = career.medals[event.id] ?? 0;
+          return `<button class="tour-event" data-event="${event.id}" ${unlocked ? "" : "disabled"}><span class="event-title">${event.title}<b>${unlocked ? "★".repeat(stars) + "☆".repeat(3 - stars) : "LOCKED"}</b></span><span class="event-kind">${event.mode === "time-trial" ? "TIME ATTACK" : event.laps === 1 ? "SPRINT" : "CUP"} · ${event.laps} LAP${event.laps > 1 ? "S" : ""} · ${event.difficulty.toUpperCase()}</span><span class="event-goal">${eventGoal(event)}</span></button>`;
+        })
+        .join(
+          "",
+        )}</div><p class="chapter-reward">${medals >= 5 ? "✓ " : "5 MEDALS → "}${chapter.reward.toUpperCase()} PAINT${medals >= 5 ? " UNLOCKED" : ""}</p></section>`;
+    }).join("");
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-event]")
+      .forEach(
+        (button) =>
+          (button.onclick = () => void launchEvent(button.dataset.event!)),
+      );
+    showScreen("tour");
+  }
+  async function launchEvent(id: string) {
+    const event = TOUR_EVENTS.find((e) => e.id === id);
+    if (!event || !eventUnlocked(career, id) || switchingTrack) return;
+    if (!(await switchRoute(event.trackId))) return;
+    selectedEvent = event;
+    selectedMode = event.mode;
+    updateRouteUI();
+    void startRace();
   }
   function finish() {
     knockoutAge = Infinity;
@@ -414,12 +663,15 @@ async function boot() {
     setTimeout(() => audio.tone(659, 0.25, 0.12), 130);
     setTimeout(() => audio.tone(784, 0.4, 0.12), 290);
     const n = sim.position;
+    $("#result-kicker").textContent = activeEvent
+      ? "WAYFINDER TOUR"
+      : "FINISH LINE CROSSED";
     const suffix = ["", "ST", "ND", "RD"][n] ?? "TH";
     $("#result-title").textContent =
       selectedMode === "time-trial"
         ? "RACE COMPLETE"
         : n === 1
-          ? "COAST TO VICTORY."
+          ? "VICTORY."
           : n <= 3
             ? "PODIUM FINISH."
             : "WHAT A RIDE.";
@@ -432,26 +684,43 @@ async function boot() {
     $("#result-drift").textContent = Math.floor(
       sim.driftScore,
     ).toLocaleString();
-    let newRecord = false;
-    if (
-      selectedMode === "race" &&
-      (!personalBest || sim.elapsed < personalBest)
-    ) {
-      personalBest = sim.elapsed;
-      writeSave("best", personalBest);
-      newRecord = true;
-    }
-    if (
-      selectedMode === "time-trial" &&
-      (!trialBest || sim.elapsed < trialBest)
-    ) {
-      trialBest = sim.elapsed;
-      writeSave("trial-best", trialBest);
-      newRecord = true;
+    const key = recordKey(selectedMode, sim.totalLaps, sim.difficulty);
+    const newRecord = !records[key] || sim.elapsed < records[key];
+    if (newRecord) {
+      records[key] = sim.elapsed;
+      writeSave("records-v3", records);
     }
     $("#new-best").textContent = newRecord
       ? "↗ NEW PERSONAL BEST"
       : `TOP SPEED ${Math.round(peakSpeed * 3.6)} KM/H · THE NEXT RUN IS YOURS`;
+    $("#tour-result").classList.toggle("hidden", !activeEvent);
+    $("#tour-return").classList.toggle("hidden", !activeEvent);
+    $("#tour-next").classList.add("hidden");
+    if (activeEvent) {
+      const award = awardEvent(
+        career,
+        activeEvent.id,
+        sim.position,
+        sim.elapsed,
+      );
+      career = award.progress;
+      writeSave("career", career);
+      if (activeEvent.id === "summit-final") {
+        $("#result-kicker").textContent = "WAYFINDER TOUR COMPLETE";
+        $("#result-title").textContent = "TOUR COMPLETE";
+      }
+      const reward = TOUR_CHAPTERS.find((c) =>
+        award.newPaints.includes(c.paint),
+      );
+      $("#tour-result").innerHTML =
+        `<strong>${"★".repeat(award.earned)}${"☆".repeat(3 - award.earned)}</strong><span>${award.improvement ? `+${award.improvement} TOUR MEDAL${award.improvement > 1 ? "S" : ""}` : "BEST MEDALS RETAINED"}${reward ? `<br>${reward.reward.toUpperCase()} PAINT UNLOCKED` : ""}</span>`;
+      const next = TOUR_EVENTS[TOUR_EVENTS.indexOf(activeEvent) + 1];
+      $("#tour-next").classList.toggle(
+        "hidden",
+        !next || !eventUnlocked(career, next.id),
+      );
+      updatePaints();
+    }
   }
   $("#race-start").onclick = startRace;
   $("#race-again").onclick = startRace;
@@ -460,6 +729,21 @@ async function boot() {
   $("#pause").onclick = pause;
   $("#quit").onclick = garage;
   $("#results-garage").onclick = garage;
+  $("#tracks-open").onclick = showRoutes;
+  $("#tracks-close").onclick = () => showScreen("menu");
+  $("#tour-open").onclick = showTour;
+  $("#tour-close").onclick = () => {
+    garage();
+  };
+  $("#tour-return").onclick = () => {
+    garage();
+    showTour();
+  };
+  $("#tour-next").onclick = () => {
+    if (!activeEvent) return;
+    const next = TOUR_EVENTS[TOUR_EVENTS.indexOf(activeEvent) + 1];
+    if (next) void launchEvent(next.id);
+  };
   $("#settings-open").onclick = () => {
     settingsReturn = "menu";
     showScreen("settings");
@@ -503,6 +787,7 @@ async function boot() {
     $("#difficulty-description").textContent =
       `${difficultyDescriptions[settings.difficulty]} Applies to your next race.`;
     $("#menu-difficulty").textContent = settings.difficulty.toUpperCase();
+    updateBest();
   }
   difficultyUI();
   $("#difficulty").onchange = () => {
@@ -524,6 +809,7 @@ async function boot() {
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach(
     (button) =>
       (button.onclick = () => {
+        selectedEvent = undefined;
         selectedMode = button.dataset.mode as RaceMode;
         document
           .querySelectorAll<HTMLButtonElement>("[data-mode]")
@@ -568,6 +854,7 @@ async function boot() {
       if (screen === "race") pause();
       else if (screen === "pause") void resume();
       else if (screen === "settings") showScreen(settingsReturn);
+      else if (screen === "tour" || screen === "tracks") garage();
       return;
     }
     if (event.code === "Enter" && screen === "menu") {
@@ -703,15 +990,18 @@ async function boot() {
     boostColor = new THREE.Color("#a3f8ff");
   const mapCanvas = $<HTMLCanvasElement>("#race-map"),
     menuMap = $<HTMLCanvasElement>("#menu-map");
-  const mapBounds = trackPoints.reduce(
-    (b, p) => ({
-      minX: Math.min(b.minX, p.x),
-      maxX: Math.max(b.maxX, p.x),
-      minZ: Math.min(b.minZ, p.z),
-      maxZ: Math.max(b.maxZ, p.z),
-    }),
-    { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity },
-  );
+  function computeMapBounds() {
+    return trackPoints.reduce(
+      (b, p) => ({
+        minX: Math.min(b.minX, p.x),
+        maxX: Math.max(b.maxX, p.x),
+        minZ: Math.min(b.minZ, p.z),
+        maxZ: Math.max(b.maxZ, p.z),
+      }),
+      { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity },
+    );
+  }
+  let mapBounds = computeMapBounds();
   function drawMap(canvas: HTMLCanvasElement, showCars: boolean) {
     const ctx = canvas.getContext("2d")!,
       w = canvas.width,
@@ -923,7 +1213,10 @@ async function boot() {
       lastImpact = sim.impact;
     }
     const menuMode =
-      screen === "menu" || (screen === "settings" && settingsReturn === "menu");
+      screen === "menu" ||
+      screen === "tracks" ||
+      screen === "tour" ||
+      (screen === "settings" && settingsReturn === "menu");
     if (menuMode) {
       const hero = sampleTrack(112, 1);
       playerCar.position.set(hero.x, hero.y + 0.055, hero.z);
@@ -1143,7 +1436,13 @@ async function boot() {
         "hidden",
         sim.elapsed > 9 || sim.phase === "finished",
       );
-      if (selectedMode === "race" && sim.elapsed > 5 && sim.elapsed <= 9) {
+      if (activeEvent && sim.elapsed <= 9) {
+        $("#race-hint").textContent = eventGoal(activeEvent);
+      } else if (
+        selectedMode === "race" &&
+        sim.elapsed > 5 &&
+        sim.elapsed <= 9
+      ) {
         $("#race-hint").textContent = touch
           ? "HOLD NITRO AND RAM A RIVAL"
           : "HOLD SHIFT AND RAM A RIVAL FOR A TAKEDOWN";
@@ -1190,6 +1489,18 @@ async function boot() {
       get: () => ({
         screen,
         phase: sim.phase,
+        trackId: activeTrack.id,
+        trackName: activeTrack.name,
+        careerEvent: activeEvent?.id ?? null,
+        career: {
+          medals: { ...career.medals },
+          totalMedals: totalMedals(career),
+          unlockedEvents: TOUR_EVENTS.filter((e) =>
+            eventUnlocked(career, e.id),
+          ).map((e) => e.id),
+          unlockedPaints: unlockedPaints(career),
+        },
+        objective: activeEvent ? eventGoal(activeEvent) : null,
         speed: sim.player.speed,
         distance: sim.player.distance,
         offset: sim.player.offset,
@@ -1230,6 +1541,7 @@ async function boot() {
   loaded();
   $("#loading").classList.add("hidden");
   garage();
+  updatePaints();
   requestAnimationFrame(renderFrame);
 }
 
