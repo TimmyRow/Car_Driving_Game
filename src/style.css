@@ -2410,4 +2410,33 @@ button:disabled {
   .car-caption {
     bottom: calc(349px + var(--safe-bottom));
   }
+  .touch-mode .speedometer {
+    width: 94px;
+    min-width: 0;
+    right: 15px;
+  }
+  .speed-number {
+    font-size: 40px;
+  }
+  .speed-unit {
+    font-size: 7px;
+  }
+  .speed-row {
+    gap: 3px;
+  }
+  .gear {
+    display: none;
+  }
+  .nitro-title {
+    font-size: 7px;
+    margin-top: 5px;
+  }
+  .nitro-track {
+    height: 5px;
+  }
+  .touch-mode .mini-map {
+    width: 76px;
+    height: 76px;
+    left: 15px;
+  }
 }
