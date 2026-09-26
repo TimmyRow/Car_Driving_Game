@@ -28,6 +28,11 @@ npm run preview
 | Nitro          | Hold Shift or X                         | Hold Nitro                |
 | Accelerate     | Automatic; W/up if disabled in Settings | Automatic                 |
 | Pause / resume | Escape                                  | Pause button              |
+| Smart Steering | Visible ON/OFF button in garage and race | Same visible ON/OFF button |
+
+**Smart Steering** steers toward a safe lane and accelerates without holding any controls. It starts enabled on touch devices and remembers your choice. The switch is always available in the garage and during racing. Steering manually takes priority immediately; releasing the arrows resumes assistance. Braking also takes priority, and nitro remains under your control. Switching Smart Steering off restores manual steering. Mobile acceleration stays automatic, so no accelerator button is needed. Online drivers use their own setting and separate assisted lanes.
+
+Mobile layouts support portrait and landscape, with touch controls placed inside phone safe areas. New touch-device sessions default to the Performance graphics preset; a saved graphics choice is preserved. Keyboard controls remain available on hybrid devices.
 
 Drifting builds nitro faster. Release an empty nitro tank before activating it again. Rivals have fixed performance with no teleporting or position-dependent speed boost. Auto acceleration helps entry; overtaking and well-timed nitro determine the win.
 

@@ -12,6 +12,10 @@
   --ink: #14272b;
   --muted: #aebdbb;
   --display: "Barlow Condensed", sans-serif;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 * {
   box-sizing: border-box;
@@ -2140,5 +2144,270 @@ button:disabled {
   }
   .route-copy h3 {
     font-size: 24px;
+  }
+}
+
+/* A visible driving choice on the garage and race screens. */
+.smart-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid #e5ff5480;
+  border-radius: 6px;
+  background: #14272bf2;
+  box-shadow: 0 3px 14px #091a3040;
+  color: #f6f7eb;
+  font: 700 17px/1.1 var(--display);
+  letter-spacing: 1px;
+  touch-action: manipulation;
+}
+.smart-toggle strong {
+  min-width: 42px;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #ffffff1c;
+  color: #e6eeeb;
+  text-align: center;
+  font-size: 15px;
+}
+.smart-toggle[aria-pressed="true"] {
+  border-color: var(--acid);
+}
+.smart-toggle[aria-pressed="true"] strong {
+  background: var(--acid);
+  color: var(--ink);
+}
+.smart-menu {
+  position: absolute;
+  top: calc(108px + var(--safe-top));
+  right: calc(44px + var(--safe-right));
+  width: 248px;
+}
+.smart-menu p {
+  margin: 8px 0 0;
+  color: #eef4e9;
+  font-size: 10px;
+  line-height: 1.5;
+  text-shadow: 0 1px 4px #14272b;
+}
+.smart-race {
+  position: absolute;
+  left: calc(35px + var(--safe-left));
+  top: calc(125px + var(--safe-top));
+  width: 214px;
+}
+.masthead,
+.hud-top {
+  margin-top: var(--safe-top);
+  margin-left: var(--safe-left);
+  margin-right: var(--safe-right);
+}
+.menu-footer {
+  margin-bottom: var(--safe-bottom);
+  margin-left: var(--safe-left);
+  margin-right: var(--safe-right);
+}
+.touch-controls {
+  margin-bottom: var(--safe-bottom);
+  margin-left: var(--safe-left);
+  margin-right: var(--safe-right);
+}
+.speedometer {
+  margin-bottom: var(--safe-bottom);
+  margin-right: var(--safe-right);
+}
+.mini-map {
+  margin-bottom: var(--safe-bottom);
+  margin-left: var(--safe-left);
+}
+.modal-backdrop {
+  padding: calc(15px + var(--safe-top)) calc(15px + var(--safe-right))
+    calc(15px + var(--safe-bottom)) calc(15px + var(--safe-left));
+}
+.panel {
+  max-height: calc(100dvh - 30px - var(--safe-top) - var(--safe-bottom));
+  max-width: 100%;
+}
+.touch-mode .masthead .icon-button,
+.touch-mode #pause,
+.touch-mode .close-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+.touch-mode .mode-switch button {
+  min-height: 44px;
+}
+.touch-mode .touch-btn {
+  -webkit-touch-callout: none;
+}
+.touch-mode .online-input,
+.touch-mode .settings-row select {
+  font-size: 16px;
+}
+.touch-mode .hero {
+  margin-left: var(--safe-left);
+}
+@media (max-width: 760px) {
+  .smart-menu {
+    right: calc(24px + var(--safe-right));
+    width: 215px;
+  }
+  .smart-race {
+    left: calc(21px + var(--safe-left));
+    top: calc(100px + var(--safe-top));
+    width: 208px;
+  }
+  .smart-toggle {
+    font-size: 16px;
+  }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .car-caption {
+    margin-left: var(--safe-left);
+    margin-right: var(--safe-right);
+    margin-bottom: var(--safe-bottom);
+  }
+  .smart-menu {
+    top: calc(74px + var(--safe-top));
+    right: calc(24px + var(--safe-right));
+    width: 210px;
+  }
+  .smart-menu p {
+    max-width: 210px;
+    font-size: 9px;
+  }
+  .smart-race {
+    top: calc(83px + var(--safe-top));
+    left: calc(20px + var(--safe-left));
+    width: 196px;
+  }
+  .smart-toggle {
+    min-height: 44px;
+    padding: 7px 11px;
+    font-size: 15px;
+  }
+}
+@media (max-height: 400px) and (orientation: landscape) {
+  .hero {
+    top: calc(64px + var(--safe-top));
+  }
+  .hero .eyebrow {
+    display: none;
+  }
+  .hero .race-options {
+    position: fixed;
+    left: calc(32px + var(--safe-left));
+    bottom: calc(120px + var(--safe-bottom));
+    margin: 0;
+  }
+  .hero .race-button {
+    position: fixed;
+    left: calc(32px + var(--safe-left));
+    bottom: calc(62px + var(--safe-bottom));
+    margin: 0;
+    min-height: 44px;
+  }
+  .car-caption {
+    left: calc(32px + var(--safe-left));
+    bottom: calc(14px + var(--safe-bottom));
+    margin: 0;
+  }
+}
+@media (max-width: 600px) and (orientation: portrait) {
+  .smart-menu {
+    top: auto;
+    bottom: calc(204px + var(--safe-bottom));
+    left: calc(25px + var(--safe-left));
+    right: calc(25px + var(--safe-right));
+    width: auto;
+  }
+  .smart-menu p {
+    font-size: 10px;
+    margin-top: 5px;
+  }
+  .hero .race-options {
+    bottom: calc(288px + var(--safe-bottom));
+    left: calc(25px + var(--safe-left));
+  }
+  .hero .race-button {
+    bottom: calc(132px + var(--safe-bottom));
+    left: calc(25px + var(--safe-left));
+    width: calc(100% - 50px - var(--safe-left) - var(--safe-right));
+  }
+  .car-caption {
+    bottom: calc(349px + var(--safe-bottom));
+  }
+  .hero {
+    margin-top: var(--safe-top);
+  }
+  .edition {
+    display: none;
+  }
+  .brand {
+    letter-spacing: 1.2px;
+  }
+  .top-actions {
+    gap: 5px;
+  }
+}
+@media (max-width: 600px) and (orientation: portrait) and (max-height: 710px) {
+  .smart-menu {
+    bottom: calc(173px + var(--safe-bottom));
+  }
+  .hero .race-options {
+    bottom: calc(253px + var(--safe-bottom));
+  }
+  .hero .race-button {
+    bottom: calc(101px + var(--safe-bottom));
+  }
+  .car-caption {
+    bottom: calc(312px + var(--safe-bottom));
+  }
+  .hero h1 {
+    font-size: 52px;
+    margin-top: 16px;
+  }
+}
+
+@media (max-width: 420px) and (orientation: portrait) {
+  .race-position {
+    min-width: 0;
+    flex: 1;
+  }
+  .position-value {
+    flex-shrink: 0;
+  }
+  .race-details {
+    min-width: 0;
+    flex: 1;
+  }
+  .race-details strong,
+  .race-details label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .hud-top-right {
+    flex-shrink: 0;
+  }
+}
+@media (max-width: 359px) and (orientation: portrait) and (max-height: 710px) {
+  .hero {
+    top: 12%;
+  }
+  .hero .eyebrow,
+  .hero .tagline {
+    display: none;
+  }
+  .hero h1 {
+    font-size: 40px;
+    margin: 8px 0;
+  }
+  .car-caption {
+    bottom: calc(349px + var(--safe-bottom));
   }
 }

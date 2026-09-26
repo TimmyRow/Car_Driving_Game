@@ -41,6 +41,7 @@ import { OnlineClient } from "./online-client";
 import { onlineMarkup } from "./online-ui";
 import type { RoomState } from "./online-protocol";
 import { CrashEffects } from "./crash-effects";
+import { smartControls } from "./smart-steering";
 import {
   initPlatform,
   loaded,
@@ -60,10 +61,13 @@ const pauseIcon =
   '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" stroke-width="3"/></svg>';
 const fullIcon =
   '<svg viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>';
+const touch =
+  matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
 const settings = readSave("settings", {
   muted: false,
-  quality: "medium",
+  quality: touch ? "low" : "medium",
   auto: true,
+  smart: touch,
   paint: "#f05b27",
   difficulty: "pro" as Difficulty,
   cinematic: true,
@@ -86,6 +90,7 @@ const records: Record<string, number> = Object.fromEntries(
 if (!["rookie", "pro", "expert"].includes(settings.difficulty))
   settings.difficulty = "pro";
 if (typeof settings.cinematic !== "boolean") settings.cinematic = true;
+if (typeof settings.smart !== "boolean") settings.smart = touch;
 const difficultyDescriptions = {
   rookie: "A forgiving pace with room to learn the circuit.",
   pro: "Fast rivals who pass traffic and time their nitro.",
@@ -120,8 +125,6 @@ let selectedMode: RaceMode = "race",
 let settingsReturn: "menu" | "pause" = "menu";
 const audio = new RaceAudio();
 audio.muted = settings.muted;
-const touch =
-  matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
 document.body.classList.toggle("touch-mode", touch);
 
 document.querySelector("#app")!.innerHTML = `
@@ -130,13 +133,14 @@ document.querySelector("#app")!.innerHTML = `
   <section id="menu" class="layer hidden" aria-label="Main menu">
     <div class="menu-shade"></div>
     <header class="masthead"><div class="brand"><i class="brand-mark"></i>VELOCITY <span class="edition"> / COAST</span></div><div class="top-actions"><button class="icon-button" id="sound" aria-label="Toggle sound">${soundIcon}</button><button class="icon-button" id="settings-open" aria-label="Settings">${gearIcon}</button><button class="icon-button" id="fullscreen" aria-label="Full screen">${fullIcon}</button></div></header>
+    <div class="smart-menu"><button id="smart-menu" class="smart-toggle" data-smart aria-pressed="false"><span>SMART STEERING</span><strong data-smart-state>OFF</strong></button><p id="smart-description">Auto steer + accelerate. Steer to take over.</p></div>
     <div class="hero"><div class="eyebrow">The coast is calling</div><h1>VELOCITY<span>COAST</span></h1><p class="tagline">Three horizons. One open road.<br>Make every mile yours.</p><div class="race-options"><div class="mode-switch" role="group" aria-label="Race mode"><button class="active" data-mode="race" aria-pressed="true">QUICK RACE <span class="difficulty-badge" id="menu-difficulty">PRO</span></button><button data-mode="time-trial" aria-pressed="false">TIME ATTACK</button><button id="tour-open">CAREER <span class="difficulty-badge">TOUR</span></button><button id="online-open" aria-label="Online race">ONLINE</button></div></div><button id="race-start" class="race-button"><span>LET’S RACE</span><span class="arrow">↗</span></button><div class="controls-line"><kbd>← →</kbd> STEER &nbsp; <kbd>SPACE</kbd> DRIFT &nbsp; <kbd>SHIFT</kbd> NITRO</div></div>
     <div class="car-caption"><div class="car-number">01</div><div><strong>APEX GT</strong><p>PURE PERFORMANCE. ZERO COMPROMISE.</p><div class="swatches" role="group" aria-label="Car paint">${validPaints.map((paint, i) => `<button class="swatch ${paint === settings.paint ? "selected" : ""}" style="--paint:${paint}" data-paint="${paint}" aria-label="${["Volcanic orange", "Glacier white", "Lagoon blue", "Acid yellow", ...TOUR_CHAPTERS.map((c) => c.reward)][i]} paint" aria-pressed="${paint === settings.paint}"></button>`).join("")}</div></div></div><div class="edition-label">THE HORIZON COLLECTION — 01 / 26</div>
     <footer class="menu-footer"><div class="circuit-summary"><canvas class="circuit-map" id="menu-map" width="224" height="140"></canvas><div><span class="small" id="menu-track-index">FEATURED CIRCUIT / 01</span><h2 id="menu-track-title">RIVIERA RUN</h2><button class="route-link" id="tracks-open">CHANGE ROUTE ↗</button><p id="circuit-description">${(trackLength / 1000).toFixed(1)} KM &nbsp; • &nbsp; 2 LAPS &nbsp; • &nbsp; 6 DRIVERS</p></div></div><div class="session-best">PERSONAL BEST<b id="menu-best">— : —</b></div></footer>
   </section>
-  <section id="hud" class="layer hud hidden" aria-label="Race information"><div class="hud-top"><div class="race-position"><div class="position-value"><span id="position">6</span><small id="field-size"> / 6</small></div><div class="race-details"><label id="hud-track-label">RIVIERA RUN</label><strong id="race-mode-label">QUICK RACE</strong><span class="lap-pill">LAP <span id="lap">1 / 2</span></span></div></div><div class="hud-top-right"><div class="clock"><small>RACE TIME</small><span id="race-time">00:00.00</span></div><button class="icon-button" id="pause" aria-label="Pause race">${pauseIcon}</button></div></div><div class="mini-map"><canvas id="race-map" width="332" height="252"></canvas><p id="map-track-label">RIVIERA RUN</p></div><div class="speedometer"><div class="speed-row"><span class="gear" id="gear">N</span><span class="speed-number" id="speed">000</span><span class="speed-unit">KM/H</span></div><div class="nitro-title"><span>NITRO</span><span id="nitro-state">SHIFT</span></div><div class="nitro-track"><div class="nitro-fill"></div></div></div><div class="race-feedback"><div class="feedback-title" id="feedback"></div><div class="feedback-sub" id="feedback-sub"></div></div><div class="countdown hidden"><span id="countdown-value">3</span><div class="countdown-label">MAKE THE ROAD YOURS</div></div><div class="race-hint" id="race-hint">AUTO ACCELERATE &nbsp; / &nbsp; ← → STEER &nbsp; / &nbsp; SPACE + STEER TO DRIFT</div><div class="touch-controls"><div><button class="touch-btn" data-control="left" aria-label="Steer left">‹</button><button class="touch-btn" data-control="right" aria-label="Steer right">›</button></div><div><button class="touch-btn drift" data-control="brake" aria-label="Brake and drift">DRIFT</button><button class="touch-btn boost" data-control="nitro" aria-label="Nitro boost">NITRO</button></div></div></section>
+  <section id="hud" class="layer hud hidden" aria-label="Race information"><div class="hud-top"><div class="race-position"><div class="position-value"><span id="position">6</span><small id="field-size"> / 6</small></div><div class="race-details"><label id="hud-track-label">RIVIERA RUN</label><strong id="race-mode-label">QUICK RACE</strong><span class="lap-pill">LAP <span id="lap">1 / 2</span></span></div></div><div class="hud-top-right"><div class="clock"><small>RACE TIME</small><span id="race-time">00:00.00</span></div><button class="icon-button" id="pause" aria-label="Pause race">${pauseIcon}</button></div></div><button id="smart-race" class="smart-toggle smart-race" data-smart aria-pressed="false"><span>SMART STEERING</span><strong data-smart-state>OFF</strong></button><div class="mini-map"><canvas id="race-map" width="332" height="252"></canvas><p id="map-track-label">RIVIERA RUN</p></div><div class="speedometer"><div class="speed-row"><span class="gear" id="gear">N</span><span class="speed-number" id="speed">000</span><span class="speed-unit">KM/H</span></div><div class="nitro-title"><span>NITRO</span><span id="nitro-state">SHIFT</span></div><div class="nitro-track"><div class="nitro-fill"></div></div></div><div class="race-feedback"><div class="feedback-title" id="feedback"></div><div class="feedback-sub" id="feedback-sub"></div></div><div class="countdown hidden"><span id="countdown-value">3</span><div class="countdown-label">MAKE THE ROAD YOURS</div></div><div class="race-hint" id="race-hint">AUTO ACCELERATE &nbsp; / &nbsp; ← → STEER &nbsp; / &nbsp; SPACE + STEER TO DRIFT</div><div class="touch-controls"><div><button class="touch-btn" data-control="left" aria-label="Steer left">‹</button><button class="touch-btn" data-control="right" aria-label="Steer right">›</button></div><div><button class="touch-btn drift" data-control="brake" aria-label="Brake and drift">DRIFT</button><button class="touch-btn boost" data-control="nitro" aria-label="Nitro boost">NITRO</button></div></div></section>
   <section id="pause-modal" class="layer modal-backdrop hidden" aria-label="Race paused"><div class="panel"><div class="eyebrow">Take a breath</div><h2>THE COAST<br>CAN WAIT.</h2><button class="race-button" id="resume"><span>BACK TO THE RACE</span><span>↗</span></button><button class="secondary-button" id="restart">RESTART RACE</button><button class="secondary-button" id="pause-settings">SETTINGS</button><button class="secondary-button" id="quit">BACK TO GARAGE</button></div></section>
-  <section id="settings-modal" class="layer modal-backdrop hidden" aria-label="Settings"><div class="panel"><div class="eyebrow">Make it yours</div><h2>FINE TUNE.</h2><label class="settings-row">Rival difficulty<select id="difficulty" aria-describedby="difficulty-description"><option value="rookie">Rookie</option><option value="pro">Pro</option><option value="expert">Expert</option></select></label><p class="setting-description" id="difficulty-description"></p><label class="settings-row">Cinematic takedowns<input type="checkbox" id="cinematic-setting" ${settings.cinematic ? "checked" : ""}></label><label class="settings-row">Sound effects<input type="checkbox" id="sound-setting" ${!settings.muted ? "checked" : ""}></label><label class="settings-row">Graphics quality<select id="quality"><option value="high">Ultra</option><option value="medium">Balanced</option><option value="low">Performance</option></select></label><label class="settings-row auto-row">Auto accelerate<input type="checkbox" id="auto-setting" ${settings.auto ? "checked" : ""}></label><p class="control-guide">← → or A D — Steer<br>Space or ↓ — Brake / hold while steering to drift<br>Shift or X — Nitro &nbsp; · &nbsp; Esc — Pause<br>W / ↑ — Accelerate when auto is off<br>Touch: steering, drift and nitro buttons. Auto accelerate is always on.</p><button class="race-button" id="settings-close"><span>ALL SET</span><span>↗</span></button></div></section>
+  <section id="settings-modal" class="layer modal-backdrop hidden" aria-label="Settings"><div class="panel"><div class="eyebrow">Make it yours</div><h2>FINE TUNE.</h2><label class="settings-row">Rival difficulty<select id="difficulty" aria-describedby="difficulty-description"><option value="rookie">Rookie</option><option value="pro">Pro</option><option value="expert">Expert</option></select></label><p class="setting-description" id="difficulty-description"></p><label class="settings-row">Cinematic takedowns<input type="checkbox" id="cinematic-setting" ${settings.cinematic ? "checked" : ""}></label><label class="settings-row">Sound effects<input type="checkbox" id="sound-setting" ${!settings.muted ? "checked" : ""}></label><label class="settings-row">Graphics quality<select id="quality"><option value="high">Ultra</option><option value="medium">Balanced</option><option value="low">Performance</option></select></label><label class="settings-row auto-row">Auto accelerate<input type="checkbox" id="auto-setting" ${settings.auto ? "checked" : ""}></label><p class="control-guide">← → or A D — Steer<br>Space or ↓ — Brake / hold while steering to drift<br>Shift or X — Nitro &nbsp; · &nbsp; Esc — Pause<br>W / ↑ — Accelerate when auto is off<br>Smart Steering: the visible ON/OFF button auto steers and accelerates. Steer to take over.<br>Touch: arrows to steer, Drift + steer to slide, Nitro to boost. Acceleration is automatic.</p><button class="race-button" id="settings-close"><span>ALL SET</span><span>↗</span></button></div></section>
   <section id="results-modal" class="layer modal-backdrop hidden" aria-label="Race results"><div class="panel"><div class="eyebrow" id="result-kicker">Finish line crossed</div><h2 id="result-title">WHAT A RIDE.</h2><div class="result-position" id="result-position">1<small>ST PLACE</small></div><div class="result-stats"><div><label>RACE TIME</label><strong id="result-time">—</strong></div><div><label>BEST LAP</label><strong id="result-lap">—</strong></div><div><label>DRIFT PTS</label><strong id="result-drift">0</strong></div></div><p class="new-best" id="new-best"></p><div id="tour-result" class="tour-result hidden"></div><div class="result-actions"><button class="race-button hidden" id="tour-next"><span>NEXT EVENT</span><span>↗</span></button><button class="secondary-button hidden" id="tour-return">BACK TO TOUR</button><button class="race-button" id="race-again"><span>ONE MORE RUN</span><span>↗</span></button><button class="secondary-button" id="results-garage">BACK TO GARAGE</button></div></div></section>
   <section id="tracks-modal" class="layer modal-backdrop hidden" aria-label="Choose route"><div class="panel route-panel"><div class="picker-heading"><div><div class="eyebrow">Explore the open road</div><h2>THREE HORIZONS.</h2></div><button class="close-button" id="tracks-close" aria-label="Close routes">×</button></div><div class="route-grid" id="route-grid"></div></div></section>
   <section id="tour-modal" class="layer modal-backdrop hidden" aria-label="Wayfinder career"><div class="panel tour-panel"><div class="picker-heading"><div><div class="eyebrow">Your road to the summit</div><h2>WAYFINDER TOUR.</h2></div><button class="close-button" id="tour-close" aria-label="Close career">×</button></div><div class="tour-summary"><span id="tour-medal-count">0 / 27 MEDALS</span><span>9 EVENTS · 3 CHAPTERS</span></div><div class="tour-grid" id="tour-grid"></div><p class="tour-footnote">Finish an event to open the next. Complete all 3 events and earn 5 medals to open the next destination. Each chapter’s paint unlocks at 5 medals.</p></div></section>
@@ -348,6 +352,12 @@ async function boot() {
   quality();
   const keys = new Set<string>(),
     touches = new Set<string>();
+  let effectiveControls: Controls = {
+    steer: 0,
+    throttle: false,
+    brake: false,
+    nitro: false,
+  };
   function clearInput() {
     keys.clear();
     touches.clear();
@@ -1174,6 +1184,35 @@ async function boot() {
     settings.auto = $<HTMLInputElement>("#auto-setting").checked;
     writeSave("settings", settings);
   };
+  function smartUI() {
+    document
+      .querySelectorAll<HTMLButtonElement>("[data-smart]")
+      .forEach((button) => {
+        button.setAttribute("aria-pressed", String(settings.smart));
+        button.setAttribute(
+          "aria-label",
+          `Smart steering ${settings.smart ? "on" : "off"}. Switch ${settings.smart ? "off" : "on"}`,
+        );
+        button.querySelector("[data-smart-state]")!.textContent = settings.smart
+          ? "ON"
+          : "OFF";
+      });
+    $("#smart-description").textContent = settings.smart
+      ? "Auto steer + accelerate. Steer to take over."
+      : touch
+        ? "You steer. Acceleration stays automatic."
+        : "You steer. Auto accelerate is in Settings.";
+  }
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-smart]")
+    .forEach((button) => {
+      button.onclick = () => {
+        settings.smart = !settings.smart;
+        smartUI();
+        writeSave("settings", settings);
+      };
+    });
+  smartUI();
   function difficultyUI() {
     $<HTMLSelectElement>("#difficulty").value = settings.difficulty;
     $("#difficulty-description").textContent =
@@ -1229,6 +1268,13 @@ async function boot() {
       }),
   );
   addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest("input,select,textarea") ||
+      ((event.code === "Enter" || event.code === "Space") &&
+        target?.closest("button"))
+    )
+      return;
     if (
       screen === "race" &&
       [
@@ -1525,7 +1571,7 @@ async function boot() {
     const dt = frameDt * (active ? timeScale : 1);
     worldTime += dt;
     if (active) {
-      const controls: Controls = {
+      let controls: Controls = {
         steer:
           Number(
             keys.has("ArrowLeft") || keys.has("KeyA") || touches.has("left"),
@@ -1546,12 +1592,21 @@ async function boot() {
           keys.has("KeyX") ||
           touches.has("nitro"),
       };
-      if (screen !== "race") {
+      if (screen === "race") {
+        controls = smartControls(
+          sim.player,
+          controls,
+          settings.smart,
+          sampleTrack(sim.player.distance).curvature,
+          online ? (online.role === "host" ? 2.8 : -2.8) : 0,
+        );
+      } else {
         controls.steer = 0;
         controls.throttle = false;
         controls.brake = true;
         controls.nitro = false;
       }
+      effectiveControls = controls;
       accumulator += dt;
       if (online?.role === "guest") {
         online.sendInput(controls);
@@ -1960,6 +2015,9 @@ async function boot() {
         difficulty: sim.difficulty,
         selectedDifficulty: settings.difficulty,
         cinematic: settings.cinematic,
+        smartSteering: settings.smart,
+        touchControls: touch,
+        effectiveControls: { ...effectiveControls },
         timeScale,
         knockoutAge,
         collisionEvents: sim.collisionEvents.map((event) => ({ ...event })),
